@@ -15,22 +15,19 @@
 #include "task_queue.hpp"
 
 namespace tp {
-
-    using task = std::unique_ptr<runnable>;
-
     // Compare tasks by runnable::priority() (max-heap: higher priority first)
-    struct task_priority_compare {
-        bool operator()(const task &a, const task &b) const {
-            if (!a && !b) {
+    struct work_task_priority_compare {
+        bool operator()(const work_task &lhs, const work_task &rhs) const {
+            if (!lhs && !rhs) {
                 return false;
             }
-            if (!a) {
+            if (!lhs) {
                 return true;
             }
-            if (!b) {
+            if (!rhs) {
                 return false;
             }
-            return a->priority() < b->priority();
+            return lhs->priority() < rhs->priority();
         }
     };
 
@@ -54,8 +51,7 @@ namespace tp {
         };
 
         thread_pool(int core_pool_size, int maximum_pool_size, std::chrono::seconds keep_alive_time,
-                    std::unique_ptr<task_queue<std::unique_ptr<runnable>>> work_queue,
-                    reject_policy policy = reject_policy::abort) :
+                    std::unique_ptr<task_queue<work_task>> work_queue, reject_policy policy = reject_policy::abort) :
             _core_pool_size(core_pool_size), _maximum_pool_size(maximum_pool_size),
             _keep_alive_time(std::chrono::duration_cast<std::chrono::seconds>(keep_alive_time)),
             _work_queue(std::move(work_queue)), _reject_policy(policy) {
@@ -65,8 +61,7 @@ namespace tp {
         }
 
         thread_pool(int core_pool_size, int maximum_pool_size, std::chrono::minutes keep_alive_time,
-                    std::unique_ptr<task_queue<std::unique_ptr<runnable>>> work_queue,
-                    reject_policy policy = reject_policy::abort) :
+                    std::unique_ptr<task_queue<work_task>> work_queue, reject_policy policy = reject_policy::abort) :
             _core_pool_size(core_pool_size), _maximum_pool_size(maximum_pool_size),
             _keep_alive_time(std::chrono::duration_cast<std::chrono::seconds>(keep_alive_time)),
             _work_queue(std::move(work_queue)), _reject_policy(policy) {
@@ -101,18 +96,20 @@ namespace tp {
             for (int i = 0; i < wc; ++i) {
                 _work_queue->try_push(nullptr);
             }
+            _work_queue->wake_all();
         }
 
         // Attempts to stop all actively executing tasks and returns a list of tasks not executed
-        std::vector<std::unique_ptr<runnable>> shutdown_now() {
+        std::vector<work_task> shutdown_now() {
             _state.store(state::stop);
             int wc = _worker_count.load();
             for (int i = 0; i < wc; ++i) {
                 _work_queue->try_push(nullptr);
             }
+            _work_queue->wake_all();
 
-            std::vector<std::unique_ptr<runnable>> remaining;
-            std::unique_ptr<runnable> task;
+            std::vector<work_task> remaining;
+            work_task task;
             while (_work_queue->try_pop(task)) {
                 if (task) {
                     remaining.push_back(std::move(task));
@@ -147,7 +144,7 @@ namespace tp {
         }
 
     private:
-        void execute_internal(std::unique_ptr<runnable> task) {
+        void execute_internal(work_task task) {
             if (_state.load() != state::running) {
                 reject(task, "thread pool is not running");
                 return;
@@ -184,7 +181,7 @@ namespace tp {
             reject(task, "queue is full and max threads reached");
         }
 
-        std::unique_ptr<runnable> add_worker(std::unique_ptr<runnable> first_task) {
+        work_task add_worker(work_task first_task) {
             int wc = _worker_count.load();
             while (wc < _maximum_pool_size) {
                 if (_state.load() != state::running && (first_task || _state.load() != state::shutdown)) {
@@ -211,8 +208,8 @@ namespace tp {
             }
         }
 
-        void run_worker(std::unique_ptr<runnable> first_task) {
-            std::unique_ptr<runnable> task = std::move(first_task);
+        void run_worker(work_task first_task) {
+            work_task task = std::move(first_task);
 
             while (task || (task = get_task())) {
                 if (!task) {
@@ -226,32 +223,39 @@ namespace tp {
             _termination.notify_all();
         }
 
-        std::unique_ptr<runnable> get_task() {
-            if (_state.load() == state::stop) {
-                return nullptr;
-            }
-
-            if (_state.load() == state::shutdown) {
-                std::unique_ptr<runnable> task;
-                if (_work_queue->try_pop(task)) {
-                    return task;
+        work_task get_task() {
+            while (true) {
+                if (_state.load() == state::stop) {
+                    return nullptr;
                 }
-                return nullptr;
-            }
 
-            bool timed = _worker_count.load() > _core_pool_size;
-            if (timed) {
-                std::unique_ptr<runnable> task;
-                if (_work_queue->pop_with_timeout(task, _keep_alive_time)) {
-                    return task;
+                if (_state.load() == state::shutdown) {
+                    work_task task;
+                    if (_work_queue->try_pop(task)) {
+                        return task;
+                    }
+                    return nullptr;
                 }
-                return nullptr;
-            }
 
-            return _work_queue->pop();
+                bool timed = _worker_count.load() > _core_pool_size;
+                if (timed) {
+                    work_task task;
+                    if (_work_queue->pop_with_timeout(task, _keep_alive_time)) {
+                        return task;
+                    }
+                    // Race condition fix: if other threads exited and worker_count dropped to core_pool_size or below,
+                    // this thread should stay alive as a core thread instead of exiting.
+                    if (_worker_count.load() <= _core_pool_size) {
+                        continue;
+                    }
+                    return nullptr;
+                }
+
+                return _work_queue->pop();
+            }
         }
 
-        void reject(std::unique_ptr<runnable> &task, const std::string &reason) {
+        void reject(work_task &task, const std::string &reason) {
             switch (_reject_policy) {
                 case reject_policy::abort:
                     throw rejected_execution_exception("Task rejected: " + reason);
@@ -263,8 +267,8 @@ namespace tp {
                 case reject_policy::discard:
                     break;
                 case reject_policy::discard_oldest: {
-                    std::unique_ptr<runnable> oldest;
-                    if (_work_queue->try_pop(oldest)) {
+                    work_task oldest_task;
+                    if (_work_queue->try_pop(oldest_task)) {
                         execute_internal(std::move(task));
                         return;
                     }
@@ -281,7 +285,7 @@ namespace tp {
         int _core_pool_size;
         int _maximum_pool_size;
         std::chrono::seconds _keep_alive_time;
-        std::unique_ptr<task_queue<std::unique_ptr<runnable>>> _work_queue;
+        std::unique_ptr<task_queue<work_task>> _work_queue;
         reject_policy _reject_policy;
 
         std::atomic<state> _state{state::running};
@@ -289,5 +293,4 @@ namespace tp {
         std::mutex _main_lock;
         std::condition_variable _termination;
     };
-
 } // namespace tp

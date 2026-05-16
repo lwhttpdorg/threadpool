@@ -11,7 +11,7 @@
 
 SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
     GIVEN("a single-threaded pool with a bounded priority task queue") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::task, tp::task_priority_compare>>(3);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(3);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("tasks with different priorities are submitted out of order") {
@@ -76,7 +76,7 @@ SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
 
 SCENARIO("thread_pool execute_with_priority overrides default priority", "[thread_pool]") {
     GIVEN("a single-threaded pool with a bounded priority task queue") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::task, tp::task_priority_compare>>(3);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(3);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("a default-priority task and a high-priority task are submitted") {
@@ -132,7 +132,7 @@ SCENARIO("thread_pool execute_with_priority overrides default priority", "[threa
 
 SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]") {
     GIVEN("a pool with core=1, max=2 and a bounded priority queue of capacity 1") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::task, tp::task_priority_compare>>(1);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(1);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("a high-priority task is submitted while queue is full") {
@@ -201,7 +201,7 @@ SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]
 
 SCENARIO("thread_pool rejects task when queue is full and max threads reached", "[thread_pool]") {
     GIVEN("a pool with core=1, max=1 and a bounded priority queue of capacity 1") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::task, tp::task_priority_compare>>(1);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(1);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue),
                              tp::thread_pool::reject_policy::abort);
 

@@ -59,7 +59,9 @@ tar -czf ~/rpmbuild/SOURCES/libthreadpool-${VERSION}.tar.gz \
 cd "$SCRIPT_DIR"
 
 # Generate spec from template
-sed "s/@VERSION@/${VERSION}/g" libthreadpool.spec.in > ~/rpmbuild/SPECS/libthreadpool.spec
+sed -e "s/@VERSION@/${VERSION}/g" \
+    -e "s/@DATE@/$(date +"%a %b %d %Y")/g" \
+    libthreadpool.spec.in > ~/rpmbuild/SPECS/libthreadpool.spec
 
 # Build RPM
 if [[ -n "$ARCH" ]]; then

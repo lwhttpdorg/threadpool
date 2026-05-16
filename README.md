@@ -7,6 +7,8 @@
   - [3.1. CMake](#3.1.-cmake)
   - [3.2. Meson](#3.2.-meson)
 - [4. Usage Example](#4.-usage-example)
+  - [4.1. FIFO queue (default)](#4.1.-fifo-queue-%28default%29)
+  - [4.2. Priority queue](#4.2.-priority-queue)
 - [5. Interface Reference](#5.-interface-reference)
   - [5.1. task_queue<T>](#5.1.-task_queue%3Ct%3E)
   - [5.2. thread_pool](#5.2.-thread_pool)
@@ -22,8 +24,9 @@ All public APIs are placed under the `tp` namespace to avoid name collisions.
 ## 1. Features
 
 - **Java-like ThreadPoolExecutor**: supports `corePoolSize`, `maximumPoolSize`, `keepAliveTime`, work queue, and rejection policies
-- **Runnable interface**: similar to Java's `Runnable`, with automatic lambda wrapping
-- **Double-buffered task queues**:
+- **Runnable interface**: similar to Java's `Runnable`, with automatic lambda wrapping and optional priority
+- **Priority tasks**: `execute_with_priority()` submits tasks with explicit priority for priority-queue ordering
+- **Pluggable task queues**:
   - `tp::fifo_task_queue<T>` — FIFO blocking queue
   - `tp::priority_task_queue<T, Compare>` — priority blocking queue
 - **Rejection policies**: `abort`, `caller_runs`, `discard`, `discard_oldest`
@@ -70,7 +73,7 @@ meson compile -C meson-build-debug -j$(nproc)
 
 ## 4. Usage Example
 
-### FIFO queue (default)
+### 4.1. FIFO queue (default)
 
 ```cpp
 #include <iostream>
@@ -89,7 +92,7 @@ struct task_obj {
 };
 
 int main() {
-    auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>();
+    auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
     tp::thread_pool pool(4, 8, std::chrono::seconds(60), std::move(work_queue));
 
     // 1. Stateless lambda
@@ -115,7 +118,7 @@ int main() {
 }
 ```
 
-### Priority queue
+### 4.2. Priority queue
 
 ```cpp
 #include <iostream>
@@ -124,7 +127,7 @@ int main() {
 #include "thread_pool.hpp"
 
 int main() {
-    auto work_queue = std::make_unique<tp::priority_task_queue<tp::task, tp::task_priority_compare>>();
+    auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>();
     tp::thread_pool pool(4, 8, std::chrono::seconds(60), std::move(work_queue));
 
     // Higher priority value = earlier execution
@@ -145,12 +148,12 @@ int main() {
 
 | Method | Description |
 |--------|-------------|
-| `push(T&&)` | Blocking enqueue |
-| `try_push(T&&)` | Non-blocking enqueue, returns `false` on failure |
+| `try_push(T&&)` | Non-blocking enqueue, returns `false` if full |
 | `pop()` | Blocking dequeue |
-| `try_pop(T&)` | Non-blocking dequeue, returns `false` on failure |
-| `pop_with_timeout(T&, ms)` | Dequeue with timeout |
-| `empty()` / `size()` | Queue state snapshot |
+| `try_pop(T&)` | Non-blocking dequeue, returns `false` if empty |
+| `pop_with_timeout(T&, timeout)` | Blocking dequeue with timeout |
+| `size()` | Queue size snapshot |
+| `wake_all()` | Wake up all threads blocked on `pop()` / `pop_with_timeout()` |
 
 > All types in this section reside in the `tp` namespace.
 
@@ -159,11 +162,12 @@ int main() {
 | Method | Description |
 |--------|-------------|
 | `execute(F&&, Args&&...)` | Submit a task (lambdas, function objects, etc. are auto-wrapped) |
+| `execute_with_priority(priority, F&&, Args&&...)` | Submit a task with explicit priority (higher value = earlier execution) |
 | `shutdown()` | Graceful shutdown: no new tasks accepted, queued tasks are executed |
 | `shutdown_now()` | Immediate shutdown: returns a list of unexecuted tasks |
-| `await_termination(ms)` | Wait for all threads to exit |
+| `await_termination(timeout)` | Wait for all threads to exit (`std::chrono::seconds`, negative = infinite) |
 | `is_shutdown()` / `is_terminated()` | State queries |
-| `active_count()` | Current number of active threads |
+| `active_count()` | Current number of active worker threads |
 | `queue_size()` | Number of pending tasks in the queue |
 
 ## 6. Testing

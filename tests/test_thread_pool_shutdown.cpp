@@ -9,7 +9,7 @@
 
 SCENARIO("thread_pool shutdown rejects new tasks", "[thread_pool]") {
     GIVEN("a running thread_pool with a busy worker and queued tasks") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>(5);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(5);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         std::atomic<bool> blocker_active{true};
@@ -39,7 +39,7 @@ SCENARIO("thread_pool shutdown rejects new tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool shutdown drains queued tasks", "[thread_pool]") {
     GIVEN("a running thread_pool with a busy worker and queued tasks") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>(5);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(5);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         std::atomic<bool> blocker_active{true};
@@ -74,7 +74,7 @@ SCENARIO("thread_pool shutdown drains queued tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool shutdown_now returns remaining tasks", "[thread_pool]") {
     GIVEN("a running thread_pool with a busy worker and queued tasks") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>(5);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(5);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         std::atomic<bool> blocker_active{true};
@@ -109,7 +109,7 @@ SCENARIO("thread_pool shutdown_now returns remaining tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool shutdown and termination state transitions", "[thread_pool]") {
     GIVEN("a running thread_pool") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         THEN("it is neither shutdown nor terminated") {

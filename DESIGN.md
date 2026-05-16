@@ -12,8 +12,7 @@
   - [2.7. `thread_pool` — Thread Pool](#2.7.-%60thread_pool%60-%E2%80%94-thread-pool)
 - [3. Class Diagram](#3.-class-diagram)
 - [4. Task Queue Design](#4.-task-queue-design)
-  - [4.1. Double-Buffering Rationale](#4.1.-double-buffering-rationale)
-  - [4.2. Poison Pill Shutdown](#4.2.-poison-pill-shutdown)
+  - [4.1. Poison Pill Shutdown](#4.1.-poison-pill-shutdown)
 - [5. Thread Pool Lifecycle](#5.-thread-pool-lifecycle)
 - [6. Rejection Policies](#6.-rejection-policies)
 <!-- /TOC -->
@@ -24,7 +23,7 @@ This project implements a C++ thread pool modeled after Java's `ThreadPoolExecut
 
 - **Interface-based architecture**: `task_queue` and `runnable` are abstract interfaces, allowing pluggable implementations
 - **Move semantics**: tasks are stored as `std::unique_ptr<runnable>`, avoiding type erasure overhead and copying
-- **Dual-buffering**: task queues use read/write buffer swapping to minimize lock contention
+- **Priority support**: `runnable` carries an unsigned priority; `execute_with_priority()` submits tasks with explicit priority for priority-queue ordering
 - **Core vs. non-core threads**: core threads persist indefinitely; non-core threads are culled after idle timeout
 
 ## 2. Core Classes
@@ -48,12 +47,13 @@ public:
 template<typename T>
 class task_queue {
 public:
+    virtual ~task_queue() = default;
+    virtual bool try_push(T&&) = 0;
     virtual T pop() = 0;
     virtual bool try_pop(T&) = 0;
     virtual bool pop_with_timeout(T&, std::chrono::milliseconds) = 0;
-    virtual void push(T&&) = 0;
-    virtual bool try_push(T&&) = 0;
-    // ...
+    virtual size_t size() const = 0;
+    virtual void wake_all() = 0;
 };
 ```
 
@@ -68,8 +68,8 @@ public:
 
 ### 2.4. `priority_task_queue<T, Compare>` — Priority Implementation
 
-- Double-buffered `std::priority_queue<T, std::vector<T>, Compare>`
-- Same lock-swapping strategy as FIFO, but with heap ordering
+- Double-buffered `std::vector<T>` with manual heap operations (`push_heap` / `pop_heap`)
+- Same lock-swapping strategy as FIFO, but with heap ordering via `Compare`
 
 ### 2.5. `reject_policy` — Rejection Policy Enum
 
@@ -131,41 +131,39 @@ classDiagram
 
     class task_queue~T~ {
         <<interface>>
-        +push(T&&) void
         +try_push(T&&) bool
         +pop() T
         +try_pop(T&) bool
         +pop_with_timeout(T&, ms) bool
-        +empty() bool
         +size() size_t
+        +wake_all() void
     }
 
     class fifo_task_queue~T~ {
-        -deque~T~ _write_buffer
-        -deque~T~ _read_buffer
+        -deque~T~ _queue
         -mutex _q_mutex
         -condition_variable _t_cond
     }
 
     class priority_task_queue~T, Compare~ {
-        -priority_queue~T~ _write_buffer
-        -priority_queue~T~ _read_buffer
+        -vector~T~ _queue
         -mutex _q_mutex
         -condition_variable _t_cond
     }
 
     class thread_pool {
         +execute(F&&, Args&&...) void
+        +execute_with_priority(priority, F&&, Args&&...) void
         +shutdown() void
         +shutdown_now() vector~task_ptr~
-        +await_termination(ms) bool
+        +await_termination(timeout) bool
         +is_shutdown() bool
         +is_terminated() bool
         +active_count() int
         +queue_size() size_t
         -_core_pool_size int
         -_maximum_pool_size int
-        -_keep_alive_time milliseconds
+        -_keep_alive_time seconds
         -_work_queue unique_ptr~task_queue~
         -_reject_policy reject_policy
         -_state atomic~state~
@@ -183,19 +181,7 @@ classDiagram
 
 ## 4. Task Queue Design
 
-### 4.1. Double-Buffering Rationale
-
-Both `fifo_task_queue` and `priority_task_queue` use a **double-buffer** pattern:
-
-- **_write_buffer**: only producers touch this
-- **_read_buffer**: only consumers touch this
-- **Swap**: under lock, when `_read_buffer` is empty
-
-This reduces lock contention because:
-- Producers only hold the lock for a quick `push_back` / `push_heap`
-- Consumers batch-read from `_read_buffer` without locking
-
-### 4.2. Poison Pill Shutdown
+### 4.1. Poison Pill Shutdown
 
 `thread_pool::shutdown()` pushes one `nullptr` (empty `unique_ptr`) per worker into the queue. When a worker pops a `nullptr`, it treats it as a poison pill and exits. This avoids needing an interrupt mechanism like Java's `Thread.interrupt()`.
 
@@ -224,5 +210,5 @@ stateDiagram-v2
 | `abort` | Throws `std::runtime_error` |
 | `caller_runs` | Runs the task synchronously in the caller thread |
 | `discard` | Silently drops the task |
-| `discard_oldest` | Discards the oldest queued task and retries enqueue |
+| `discard_oldest` | Discards the oldest queued task and retries enqueue; falls back to `caller_runs` if queue is empty |
 

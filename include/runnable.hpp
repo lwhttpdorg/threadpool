@@ -5,7 +5,6 @@
 #include <utility>
 
 namespace tp {
-
     // Abstract interface for executable tasks, similar to Java's Runnable
     class runnable {
     public:
@@ -24,6 +23,8 @@ namespace tp {
         unsigned int _priority;
     };
 
+    using work_task = std::unique_ptr<runnable>;
+
     // Adapter that wraps any callable (lambda, function object, etc.) into a runnable
     template<typename F>
     class lambda_runnable: public runnable {
@@ -40,14 +41,13 @@ namespace tp {
 
     // Factory function: creates a runnable from any callable object
     template<typename F>
-    std::unique_ptr<runnable> make_runnable(F &&f) {
+    work_task make_runnable(F &&f) {
         return std::make_unique<lambda_runnable<std::decay_t<F>>>(std::forward<F>(f));
     }
 
     // Factory function: creates a runnable with explicit priority from any callable object
     template<typename F>
-    std::unique_ptr<runnable> make_runnable(unsigned int priority, F &&f) {
+    work_task make_runnable(unsigned int priority, F &&f) {
         return std::make_unique<lambda_runnable<std::decay_t<F>>>(std::forward<F>(f), priority);
     }
-
 } // namespace tp

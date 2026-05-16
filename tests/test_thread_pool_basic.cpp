@@ -9,7 +9,7 @@
 
 SCENARIO("thread_pool executes submitted tasks", "[thread_pool]") {
     GIVEN("a thread_pool with 2 core and 4 max threads") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
         tp::thread_pool pool(2, 4, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("several tasks are submitted") {
@@ -29,7 +29,7 @@ SCENARIO("thread_pool executes submitted tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool keeps core threads alive", "[thread_pool]") {
     GIVEN("a thread_pool with 2 core threads") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
         tp::thread_pool pool(2, 4, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("tasks are executed and complete") {
@@ -56,7 +56,7 @@ SCENARIO("thread_pool keeps core threads alive", "[thread_pool]") {
 
 SCENARIO("thread_pool queue_size reflects pending tasks", "[thread_pool]") {
     GIVEN("a thread_pool with 1 core thread") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("multiple slow tasks are submitted") {
