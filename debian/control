@@ -1,0 +1,15 @@
+Source: threadpool
+Section: libdevel
+Priority: optional
+Maintainer: Alex Sandro <sandrodickens@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.11)
+Standards-Version: 4.6.0
+Homepage: https://github.com/lwhttpdorg/threadpool
+Rules-Requires-Root: no
+
+Package: libthreadpool-dev
+Architecture: all
+Multi-Arch: foreign
+Depends: ${misc:Depends}
+Description: header-only C++ thread pool library
