@@ -2,7 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "task_queue.hpp"
+#include "threadpool/task_queue.hpp"
 
 SCENARIO("fifo_task_queue maintains first-in-first-out ordering", "[fifo_task_queue]") {
     GIVEN("an empty fifo_task_queue") {

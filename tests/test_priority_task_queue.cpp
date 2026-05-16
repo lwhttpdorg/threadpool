@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "task_queue.hpp"
+#include "threadpool/task_queue.hpp"
 
 SCENARIO("priority_task_queue orders items by priority (max-heap)", "[priority_task_queue]") {
     GIVEN("an empty priority_task_queue with std::less compare") {

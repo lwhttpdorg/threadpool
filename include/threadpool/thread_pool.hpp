@@ -11,8 +11,8 @@
 #include <thread>
 #include <vector>
 
-#include "runnable.hpp"
-#include "task_queue.hpp"
+#include "threadpool/runnable.hpp"
+#include "threadpool/task_queue.hpp"
 
 namespace tp {
     // Compare tasks by runnable::priority() (max-heap: higher priority first)

@@ -79,7 +79,7 @@ meson compile -C meson-build-debug -j$(nproc)
 #include <iostream>
 #include <memory>
 #include "task_queue.hpp"
-#include "thread_pool.hpp"
+#include "threadpool/thread_pool.hpp"
 
 void task_func(int id) {
     std::cout << "Processing " << id << "\n";
@@ -123,8 +123,9 @@ int main() {
 ```cpp
 #include <iostream>
 #include <memory>
+
 #include "task_queue.hpp"
-#include "thread_pool.hpp"
+#include "threadpool/thread_pool.hpp"
 
 int main() {
     auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>();

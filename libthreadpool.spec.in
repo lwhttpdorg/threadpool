@@ -26,7 +26,7 @@ A C++ thread pool library.
 %files
 %license LICENSE
 %doc README.md
-%{_includedir}/*.hpp
+%{_includedir}/threadpool/*.hpp
 %{_prefix}/lib/cmake/ThreadPool/
 
 %changelog

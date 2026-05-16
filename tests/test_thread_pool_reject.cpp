@@ -8,8 +8,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "task_queue.hpp"
-#include "thread_pool.hpp"
+#include "threadpool/task_queue.hpp"
+#include "threadpool/thread_pool.hpp"
 
 SCENARIO("thread_pool reject policy abort throws exception", "[thread_pool]") {
     GIVEN("a running thread_pool with abort policy and a full queue") {

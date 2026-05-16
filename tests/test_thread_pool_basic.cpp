@@ -4,8 +4,8 @@
 #include <memory>
 #include <thread>
 
-#include "task_queue.hpp"
-#include "thread_pool.hpp"
+#include "threadpool/task_queue.hpp"
+#include "threadpool/thread_pool.hpp"
 
 SCENARIO("thread_pool executes submitted tasks", "[thread_pool]") {
     GIVEN("a thread_pool with 2 core and 4 max threads") {

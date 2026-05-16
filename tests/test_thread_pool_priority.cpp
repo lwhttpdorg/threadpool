@@ -6,8 +6,8 @@
 #include <mutex>
 #include <vector>
 
-#include "task_queue.hpp"
-#include "thread_pool.hpp"
+#include "threadpool/task_queue.hpp"
+#include "threadpool/thread_pool.hpp"
 
 SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
     GIVEN("a single-threaded pool with a bounded priority task queue") {
