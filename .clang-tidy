@@ -1,0 +1,97 @@
+---
+# Note: Alas, `Checks` is a string, not an array.
+#       Comments in the block string are not parsed and are passed in the value.
+#       They must thus be delimited by ',' from either side - then they are
+#       harmless. It's terrible, but it works.
+Checks: >-
+  clang-diagnostic-*,
+  clang-analyzer-*,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -clang-diagnostic-vla-cxx-extension,
+
+  bugprone-*,
+  -bugprone-unchecked-optional-access,
+  ,# This is ridiculous, as it triggers on constants,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-easily-swappable-parameters,
+  ,# Is not really useful, has false positives, triggers for no-noexcept move constructors ...,
+  -bugprone-exception-escape,
+  -bugprone-narrowing-conversions,
+  -bugprone-chained-comparison,# RIP decomposers,
+
+  modernize-*,
+  -modernize-avoid-c-arrays,
+  -modernize-use-emplace,
+  -modernize-use-auto,
+  -modernize-use-trailing-return-type,
+  -modernize-return-braced-init-list,
+  -modernize-use-nodiscard,
+  -modernize-use-default-member-init,
+  ,# There's a lot of these and most of them are probably not useful,
+  -modernize-pass-by-value,
+  -modernize-avoid-variadic-functions,
+  
+  ,# --- C++20 specific exclusions ---,
+  -modernize-use-starts-ends-with,
+  -modernize-use-ranges,
+  -modernize-use-designated-initializers,
+
+  performance-*,
+
+  portability-*,
+  -portability-avoid-pragma-once,
+
+  readability-*,
+
+  -readability-braces-around-statements,
+  -readability-container-size-empty,
+  -readability-convert-member-functions-to-static,
+  -readability-else-after-return,
+  -readability-function-cognitive-complexity,
+  -readability-function-size,
+  -readability-identifier-length,
+  -readability-isolate-declaration,
+  -readability-magic-numbers,
+  -readability-math-missing-parentheses, #no, 'a + B * C' obeying math rules is not confusing,
+  -readability-named-parameter,
+  -readability-qualified-auto,
+  -readability-redundant-access-specifiers,
+  -readability-simplify-boolean-expr,
+  -readability-static-definition-in-anonymous-namespace,
+  -readability-uppercase-literal-suffix,
+  -readability-use-anyofallof,
+  -readability-avoid-return-with-void-value,
+  
+  ,# --- C++20 specific exclusions ---,
+  -readability-container-contains,
+
+  misc-unused-using-decls,
+  misc-unused-parameters,
+
+  ,# time hogs,
+  -bugprone-throw-keyword-missing,
+  -modernize-replace-auto-ptr,
+  -readability-identifier-naming,
+
+  ,# We cannot use this until clang-tidy supports custom unique_ptr,
+  -bugprone-use-after-move,
+  ,# Doesn't recognize unevaluated context in CATCH_MOVE and CATCH_FORWARD,
+  -bugprone-macro-repeated-side-effects,
+
+WarningsAsErrors: >-
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  performance-move-const-arg,
+  performance-unnecessary-value-param,
+  readability-duplicate-include,
+
+HeaderFilterRegex: '.*\.(h|hpp|hxx|c|cc|cxx|cpp)$'
+FormatStyle:     none
+CheckOptions:
+  - key:             readability-implicit-bool-conversion.AllowPointerToBool
+    value:           'false'
+  - key:             readability-implicit-bool-conversion.AllowIntegerToBool
+    value:           'false'
+SystemHeaders: false

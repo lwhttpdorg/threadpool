@@ -1,0 +1,5 @@
+---
+InheritParentConfig: true
+Checks: >-
+  -bugprone-throwing-static-initialization,
+  -performance-move-const-arg,
