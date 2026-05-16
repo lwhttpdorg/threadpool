@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <deque>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <queue>
 #include <type_traits>
@@ -15,12 +16,6 @@ namespace tp {
     class task_queue {
     public:
         virtual ~task_queue() = default;
-
-        // Push a batch of items (move only)
-        virtual void push(std::vector<T> &&items) = 0;
-
-        // Push a single item (move only)
-        virtual void push(T &&item) = 0;
 
         // Non-blocking push (move): returns false if queue is full
         virtual bool try_push(T &&item) = 0;
@@ -34,9 +29,6 @@ namespace tp {
         // Blocking pop with timeout: returns false if timeout
         virtual bool pop_with_timeout(T &item, std::chrono::milliseconds timeout) = 0;
 
-        // Check if queue is empty (snapshot only)
-        virtual bool empty() const = 0;
-
         // Get total size of queue (snapshot only)
         virtual size_t size() const = 0;
     };
@@ -45,28 +37,20 @@ namespace tp {
     template<typename T>
     class fifo_task_queue: public task_queue<T> {
     public:
-        // Push a batch of items (move)
-        void push(std::vector<T> &&items) override {
-            {
-                std::unique_lock<std::mutex> lock(_q_mutex);
-                _write_buffer.insert(_write_buffer.end(), std::make_move_iterator(items.begin()),
-                                     std::make_move_iterator(items.end()));
-            }
-            _t_cond.notify_all();
+        explicit fifo_task_queue(size_t capacity = std::numeric_limits<size_t>::max()) : _capacity(capacity) {
         }
 
-        // Push a single item (move)
-        void push(T &&item) override {
+        // Non-blocking push (move): returns false if queue is full
+        bool try_push(T &&item) override {
             {
                 std::unique_lock<std::mutex> lock(_q_mutex);
+                if (_capacity != std::numeric_limits<size_t>::max()
+                    && _read_buffer.size() + _write_buffer.size() >= _capacity) {
+                    return false;
+                }
                 _write_buffer.push_back(std::move(item));
             }
             _t_cond.notify_one();
-        }
-
-        // Non-blocking push (move): for unbounded queue, always returns true
-        bool try_push(T &&item) override {
-            push(std::move(item));
             return true;
         }
 
@@ -81,9 +65,8 @@ namespace tp {
             }
             T item = std::move(_read_buffer.front());
             _read_buffer.pop_front();
-            if (!_read_buffer.empty() || !_write_buffer.empty()) {
-                _t_cond.notify_one();
-            }
+            lock.unlock();
+            _t_cond.notify_one();
             return item;
         }
 
@@ -100,6 +83,8 @@ namespace tp {
             }
             item = std::move(_read_buffer.front());
             _read_buffer.pop_front();
+            lock.unlock();
+            _t_cond.notify_one();
             return true;
         }
 
@@ -117,16 +102,9 @@ namespace tp {
             }
             item = std::move(_read_buffer.front());
             _read_buffer.pop_front();
-            if (!_read_buffer.empty() || !_write_buffer.empty()) {
-                _t_cond.notify_one();
-            }
+            lock.unlock();
+            _t_cond.notify_one();
             return true;
-        }
-
-        // Check if queue is empty (snapshot only)
-        bool empty() const override {
-            std::lock_guard<std::mutex> lock(_q_mutex);
-            return _read_buffer.empty() && _write_buffer.empty();
         }
 
         // Get total size of queue (snapshot only)
@@ -140,35 +118,27 @@ namespace tp {
         std::deque<T> _read_buffer;
         mutable std::mutex _q_mutex;
         std::condition_variable _t_cond;
+        size_t _capacity = std::numeric_limits<size_t>::max();
     };
 
     // Priority blocking task queue
     template<typename T, typename Compare = std::less<T>>
     class priority_task_queue: public task_queue<T> {
     public:
-        // Push a batch of items (move)
-        void push(std::vector<T> &&items) override {
-            {
-                std::unique_lock<std::mutex> lock(_q_mutex);
-                for (auto &item: items) {
-                    push_heap(_write_buffer, std::move(item));
-                }
-            }
-            _t_cond.notify_all();
+        explicit priority_task_queue(size_t capacity = std::numeric_limits<size_t>::max()) : _capacity(capacity) {
         }
 
-        // Push a single item (move)
-        void push(T &&item) override {
+        // Non-blocking push (move): returns false if queue is full
+        bool try_push(T &&item) override {
             {
                 std::unique_lock<std::mutex> lock(_q_mutex);
+                if (_capacity != std::numeric_limits<size_t>::max()
+                    && _read_buffer.size() + _write_buffer.size() >= _capacity) {
+                    return false;
+                }
                 push_heap(_write_buffer, std::move(item));
             }
             _t_cond.notify_one();
-        }
-
-        // Non-blocking push (move): for unbounded queue, always returns true
-        bool try_push(T &&item) override {
-            push(std::move(item));
             return true;
         }
 
@@ -182,9 +152,8 @@ namespace tp {
                 _read_buffer.swap(_write_buffer);
             }
             T item = pop_heap(_read_buffer);
-            if (!_read_buffer.empty() || !_write_buffer.empty()) {
-                _t_cond.notify_one();
-            }
+            lock.unlock();
+            _t_cond.notify_one();
             return item;
         }
 
@@ -200,6 +169,8 @@ namespace tp {
                 }
             }
             item = pop_heap(_read_buffer);
+            lock.unlock();
+            _t_cond.notify_one();
             return true;
         }
 
@@ -216,16 +187,9 @@ namespace tp {
                 _read_buffer.swap(_write_buffer);
             }
             item = pop_heap(_read_buffer);
-            if (!_read_buffer.empty() || !_write_buffer.empty()) {
-                _t_cond.notify_one();
-            }
+            lock.unlock();
+            _t_cond.notify_one();
             return true;
-        }
-
-        // Check if queue is empty (snapshot only)
-        bool empty() const override {
-            std::lock_guard<std::mutex> lock(_q_mutex);
-            return _read_buffer.empty() && _write_buffer.empty();
         }
 
         // Get total size of queue (snapshot only)
@@ -240,6 +204,7 @@ namespace tp {
         mutable std::mutex _q_mutex;
         std::condition_variable _t_cond;
         Compare _compare;
+        size_t _capacity = std::numeric_limits<size_t>::max();
 
         void push_heap(std::vector<T> &buf, T &&item) {
             buf.push_back(std::move(item));

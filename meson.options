@@ -1,1 +1,2 @@
 option('build_tests', type : 'boolean', value : false, description : 'Build tests')
+option('enable_asan', type : 'boolean', value : false, description : 'Enable AddressSanitizer for tests')

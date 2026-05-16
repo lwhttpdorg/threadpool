@@ -99,7 +99,7 @@ namespace tp {
             _state.store(state::shutdown);
             int wc = _worker_count.load();
             for (int i = 0; i < wc; ++i) {
-                _work_queue->push(nullptr);
+                _work_queue->try_push(nullptr);
             }
         }
 
@@ -108,7 +108,7 @@ namespace tp {
             _state.store(state::stop);
             int wc = _worker_count.load();
             for (int i = 0; i < wc; ++i) {
-                _work_queue->push(nullptr);
+                _work_queue->try_push(nullptr);
             }
 
             std::vector<std::unique_ptr<runnable>> remaining;
@@ -163,6 +163,10 @@ namespace tp {
 
             if (_work_queue->try_push(std::move(task))) {
                 int recheck = _worker_count.load();
+                if (_state.load() != state::running && _work_queue->try_pop(task)) {
+                    reject(task, "thread pool is not running");
+                    return;
+                }
                 if (recheck == 0) {
                     add_worker(nullptr);
                 }

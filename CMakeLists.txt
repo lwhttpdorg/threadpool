@@ -14,15 +14,22 @@ target_include_directories(thread_pool INTERFACE
 target_link_libraries(thread_pool INTERFACE pthread)
 
 option(THREAD_POOL_BUILD_TESTS "Build thread_pool tests" OFF)
+option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
 
 if(THREAD_POOL_BUILD_TESTS)
-    Include(FetchContent)
-    FetchContent_Declare(
-      Catch2
-      GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-      GIT_TAG        v3.4.0
-    )
-    FetchContent_MakeAvailable(Catch2)
+    find_package(Catch2 3 CONFIG QUIET)
+    if(NOT Catch2_FOUND)
+        message(STATUS "Catch2 not found, fetching from GitHub...")
+        Include(FetchContent)
+        FetchContent_Declare(
+          Catch2
+          GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+          GIT_TAG        v3.4.0
+        )
+        FetchContent_MakeAvailable(Catch2)
+    else()
+        message(STATUS "Found system-installed Catch2")
+    endif()
     enable_testing()
     add_subdirectory(tests)
 endif()

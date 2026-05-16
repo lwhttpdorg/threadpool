@@ -10,7 +10,6 @@ thread_pool_dep = declare_dependency(
 )
 
 if get_option('build_tests')
-  catch2_proj = subproject('catch2')
-  catch2_dep = catch2_proj.get_variable('catch2_with_main_dep')
+  catch2_dep = dependency('catch2-with-main', version : '>=3.0', fallback : ['catch2', 'catch2_with_main_dep'])
   subdir('tests')
 endif

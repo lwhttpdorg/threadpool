@@ -9,15 +9,15 @@ SCENARIO("fifo_task_queue maintains first-in-first-out ordering", "[fifo_task_qu
         tp::fifo_task_queue<int> task_q;
 
         WHEN("multiple items are pushed in sequence") {
-            task_q.push(1);
-            task_q.push(2);
-            task_q.push(3);
+            task_q.try_push(1);
+            task_q.try_push(2);
+            task_q.try_push(3);
 
             THEN("items are popped in the same order") {
                 REQUIRE(task_q.pop() == 1);
                 REQUIRE(task_q.pop() == 2);
                 REQUIRE(task_q.pop() == 3);
-                REQUIRE(task_q.empty());
+                REQUIRE(task_q.size() == 0);
             }
         }
     }
@@ -55,7 +55,7 @@ SCENARIO("fifo_task_queue pop_with_timeout behavior", "[fifo_task_queue]") {
 
     GIVEN("a fifo_task_queue with one item") {
         tp::fifo_task_queue<int> task_q;
-        task_q.push(42);
+        task_q.try_push(42);
 
         WHEN("pop_with_timeout is called") {
             int item = 0;
@@ -78,8 +78,8 @@ SCENARIO("fifo_task_queue tracks size correctly", "[fifo_task_queue]") {
         }
 
         WHEN("two items are pushed") {
-            task_q.push(1);
-            task_q.push(2);
+            task_q.try_push(1);
+            task_q.try_push(2);
 
             THEN("its size is 2") {
                 REQUIRE(task_q.size() == 2);
@@ -101,8 +101,9 @@ SCENARIO("fifo_task_queue supports batch push", "[fifo_task_queue]") {
         tp::fifo_task_queue<int> task_q;
 
         WHEN("a batch of items is pushed") {
-            std::vector<int> items = {1, 2, 3};
-            task_q.push(std::move(items));
+            task_q.try_push(1);
+            task_q.try_push(2);
+            task_q.try_push(3);
 
             THEN("all items are available in order") {
                 REQUIRE(task_q.pop() == 1);
@@ -121,7 +122,7 @@ SCENARIO("fifo_task_queue handles concurrent push and pop", "[fifo_task_queue]")
         WHEN("producer pushes 1000 items while consumer pops them") {
             std::thread producer([&]() {
                 for (int i = 0; i < count; ++i) {
-                    task_q.push(std::move(i));
+                    task_q.try_push(std::move(i));
                 }
             });
 
@@ -136,7 +137,7 @@ SCENARIO("fifo_task_queue handles concurrent push and pop", "[fifo_task_queue]")
             consumer.join();
 
             THEN("the queue is empty after all operations") {
-                REQUIRE(task_q.empty());
+                REQUIRE(task_q.size() == 0);
             }
         }
     }
