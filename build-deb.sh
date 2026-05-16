@@ -26,13 +26,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ $CLEAN -eq 1 ]]; then
-    echo "Cleaning build artifacts..."
-    rm -rf debian/.debhelper debian/threadpool debian/files \
-           debian/*.debhelper.log debian/*.substvars debian/*.debhelper
-    rm -rf obj-*-linux-gnu obj-*
-    rm -f ../*.deb ../*.changes ../*.buildinfo ../*.dsc \
-          ../*.tar.xz ../*.tar.gz ../*.upload
-    fakeroot debian/rules clean 2>/dev/null || true
+    fakeroot debian/rules clean
+    rm -f ../*.deb ../*.changes ../*.buildinfo
     echo "Clean done."
     exit 0
 fi
@@ -45,10 +40,6 @@ fi
 
 VERSION=$(sed -n 's/^project(ThreadPool VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
 echo "Building threadpool ${VERSION} DEB package..."
-
-# Update changelog date to today
-DEB_DATE=$(date -R)
-sed -i "s/^ -- Alex Sandro <dev@manjunos\.com>  .*$/ -- Alex Sandro <dev@manjunos.com>  ${DEB_DATE}/" debian/changelog
 
 fakeroot debian/rules clean 2>/dev/null || true
 DEB_BUILD_OPTIONS="$BUILD_OPTS" dpkg-buildpackage -us -uc -b -j$(nproc) $ARCH_OPT
