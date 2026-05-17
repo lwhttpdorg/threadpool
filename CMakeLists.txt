@@ -11,7 +11,6 @@ target_include_directories(thread_pool INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(thread_pool INTERFACE pthread)
 
 option(THREAD_POOL_BUILD_TESTS "Build thread_pool tests" OFF)
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
