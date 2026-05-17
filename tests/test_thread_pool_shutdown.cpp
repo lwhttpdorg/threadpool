@@ -10,7 +10,7 @@
 
 SCENARIO("thread_pool shutdown rejects new tasks", "[thread_pool]") {
     GIVEN("a running thread_pool with a busy worker and queued tasks") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(5);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>(5);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         std::atomic<bool> blocker_active{true};
@@ -40,7 +40,7 @@ SCENARIO("thread_pool shutdown rejects new tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool shutdown drains queued tasks", "[thread_pool]") {
     GIVEN("a running thread_pool with a busy worker and queued tasks") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(5);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>(5);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         std::atomic<bool> blocker_active{true};
@@ -67,7 +67,6 @@ SCENARIO("thread_pool shutdown drains queued tasks", "[thread_pool]") {
             THEN("queued tasks are eventually executed") {
                 REQUIRE(pool.await_termination(std::chrono::seconds(5)));
                 REQUIRE(executed.load() == 3);
-                REQUIRE(pool.is_terminated());
             }
         }
     }
@@ -75,7 +74,7 @@ SCENARIO("thread_pool shutdown drains queued tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool shutdown_now returns remaining tasks", "[thread_pool]") {
     GIVEN("a running thread_pool with a busy worker and queued tasks") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(5);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>(5);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         std::atomic<bool> blocker_active{true};
@@ -110,21 +109,19 @@ SCENARIO("thread_pool shutdown_now returns remaining tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool shutdown and termination state transitions", "[thread_pool]") {
     GIVEN("a running thread_pool") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>();
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
-        THEN("it is neither shutdown nor terminated") {
-            REQUIRE_FALSE(pool.is_shutdown());
-            REQUIRE_FALSE(pool.is_terminated());
+        THEN("it accepts new tasks") {
+            REQUIRE_NOTHROW(pool.execute([]() {}));
         }
 
         WHEN("shutdown is called on an empty pool") {
             pool.shutdown();
 
-            THEN("it is shutdown and eventually terminated") {
-                REQUIRE(pool.is_shutdown());
+            THEN("new tasks are rejected and workers exit") {
+                REQUIRE_THROWS_AS(pool.execute([]() {}), tp::thread_pool::rejected_execution_exception);
                 REQUIRE(pool.await_termination(std::chrono::seconds(5)));
-                REQUIRE(pool.is_terminated());
             }
         }
     }

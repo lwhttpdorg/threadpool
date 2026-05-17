@@ -13,7 +13,7 @@
 
 SCENARIO("thread_pool reject policy abort throws exception", "[thread_pool]") {
     GIVEN("a running thread_pool with abort policy and a full queue") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(1);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>(1);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue),
                              tp::thread_pool::reject_policy::abort);
 
@@ -58,7 +58,7 @@ SCENARIO("thread_pool reject policy abort throws exception", "[thread_pool]") {
 
 SCENARIO("thread_pool reject policy caller_runs executes in caller thread", "[thread_pool]") {
     GIVEN("a running thread_pool with caller_runs policy and a full queue") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(1);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>(1);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue),
                              tp::thread_pool::reject_policy::caller_runs);
 
@@ -106,7 +106,7 @@ SCENARIO("thread_pool reject policy caller_runs executes in caller thread", "[th
 
 SCENARIO("thread_pool reject policy discard silently drops tasks", "[thread_pool]") {
     GIVEN("a running thread_pool with discard policy and a full queue") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(1);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>(1);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue),
                              tp::thread_pool::reject_policy::discard);
 
@@ -153,7 +153,7 @@ SCENARIO("thread_pool reject policy discard silently drops tasks", "[thread_pool
 
 SCENARIO("thread_pool reject policy discard_oldest removes oldest queued task", "[thread_pool]") {
     GIVEN("a running thread_pool with discard_oldest policy and a full queue") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>(2);
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>(2);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue),
                              tp::thread_pool::reject_policy::discard_oldest);
 

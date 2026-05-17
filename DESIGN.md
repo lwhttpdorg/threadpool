@@ -3,7 +3,7 @@
 <!-- TOC -->
 - [1. Overview](#1.-overview)
 - [2. Core Classes](#2.-core-classes)
-  - [2.1. `runnable` — Task Interface](#2.1.-%60runnable%60-%E2%80%94-task-interface)
+  - [2.1. `callable` — Task Wrapper](#2.1.-%60callable%60-%E2%80%94-task-wrapper)
   - [2.2. `task_queue<T>` — Queue Interface](#2.2.-%60task_queue%3Ct%3E%60-%E2%80%94-queue-interface)
   - [2.3. `fifo_task_queue<T>` — FIFO Implementation](#2.3.-%60fifo_task_queue%3Ct%3E%60-%E2%80%94-fifo-implementation)
   - [2.4. `priority_task_queue<T, Compare>` — Priority Implementation](#2.4.-%60priority_task_queue%3Ct%2C-compare%3E%60-%E2%80%94-priority-implementation)
@@ -14,32 +14,43 @@
 - [4. Task Queue Design](#4.-task-queue-design)
   - [4.1. Poison Pill Shutdown](#4.1.-poison-pill-shutdown)
 - [5. Thread Pool Lifecycle](#5.-thread-pool-lifecycle)
-- [6. Rejection Policies](#6.-rejection-policies)
+- [6. Exception Handling](#6.-exception-handling)
+- [7. Rejection Policies](#7.-rejection-policies)
 <!-- /TOC -->
 
 ## 1. Overview
 
 This project implements a C++ thread pool modeled after Java's `ThreadPoolExecutor`. The design emphasizes:
 
-- **Interface-based architecture**: `task_queue` and `runnable` are abstract interfaces, allowing pluggable implementations
-- **Move semantics**: tasks are stored as `std::unique_ptr<runnable>`, avoiding type erasure overhead and copying
-- **Priority support**: `runnable` carries an unsigned priority; `execute_with_priority()` submits tasks with explicit priority for priority-queue ordering
+- **Interface-based architecture**: `task_queue` is an abstract interface, allowing pluggable implementations
+- **Move semantics**: tasks (`callable`) are moved through the pipeline, avoiding unnecessary copies of `std::function`
+- **Priority support**: `callable` carries an unsigned priority; `execute()` submits tasks with explicit priority for priority-queue ordering
 - **Core vs. non-core threads**: core threads persist indefinitely; non-core threads are culled after idle timeout
+- **Exception safety**: worker threads catch all exceptions thrown by user tasks, preventing `std::terminate`
 
 ## 2. Core Classes
 
-### 2.1. `runnable` — Task Interface
+### 2.1. `callable` — Task Wrapper
 
 ```cpp
-class runnable {
+class callable {
 public:
-    virtual ~runnable() = default;
-    virtual void run() = 0;
+    static constexpr unsigned int LOWEST_PRIORITY = std::numeric_limits<unsigned int>::min();
+    static constexpr unsigned int HIGHEST_PRIORITY = std::numeric_limits<unsigned int>::max();
+
+    callable();
+    explicit callable(std::function<void(void)> _func);
+    callable(std::function<void(void)> _func, unsigned int _priority);
+
+    void operator()() const;
+    explicit operator bool() const;
+    int compare(const callable &other) const;
 };
 ```
 
-- Pure abstract interface for executable tasks
-- `lambda_runnable<F>` adapts any callable (lambdas, function objects, `std::bind` results) into a `runnable`
+- Lightweight wrapper around `std::function<void()>`
+- Supports an optional `unsigned int` priority for priority-queue ordering
+- Empty `callable` (default-constructed) evaluates to `false` in boolean context
 
 ### 2.2. `task_queue<T>` — Queue Interface
 
@@ -58,27 +69,28 @@ public:
 ```
 
 - Abstract blocking queue interface
-- `T` is `std::unique_ptr<runnable>` in the thread pool context
+- `T` is `callable` in the thread pool context
 
 ### 2.3. `fifo_task_queue<T>` — FIFO Implementation
 
-- Double-buffered `std::deque<T>`
-- Producers append to `_write_buffer`; consumers read from `_read_buffer`
-- Buffers are swapped under lock when `_read_buffer` is empty
+- Backed by `std::deque<T>`
+- Producers push to the back under lock and notify one consumer
+- Consumers pop from the front under lock and notify one producer
+- `pop()` blocks on a `condition_variable` with `!task_q.empty()` predicate
 
 ### 2.4. `priority_task_queue<T, Compare>` — Priority Implementation
 
-- Double-buffered `std::vector<T>` with manual heap operations (`push_heap` / `pop_heap`)
-- Same lock-swapping strategy as FIFO, but with heap ordering via `Compare`
+- Backed by `std::vector<T>` with manual heap operations (`push_heap` / `pop_heap`)
+- Same locking and notification strategy as FIFO, but with heap ordering via `Compare`
 
 ### 2.5. `reject_policy` — Rejection Policy Enum
 
 ```cpp
 enum class reject_policy {
-    abort,         // throw std::runtime_error
+    abort,         // throw rejected_execution_exception
     caller_runs,   // execute in caller thread
     discard,       // silently drop
-    discard_oldest // remove oldest queued task and retry
+    discard_oldest // remove oldest queued task and retry submission once
 };
 ```
 
@@ -98,35 +110,41 @@ enum class state {
 
 Manages worker threads and task dispatching according to Java `ThreadPoolExecutor` semantics.
 
-Constructors accept `std::chrono::seconds` or `std::chrono::minutes` for `keep_alive_time`, internally converted to milliseconds:
+`thread_pool` is **non-copyable and non-movable**.
+
+Constructors accept `std::chrono::seconds` or `std::chrono::minutes` for `keep_alive_time`, internally converted to seconds:
 
 ```cpp
 thread_pool(int core, int max, std::chrono::seconds keep_alive,
-            std::unique_ptr<task_queue<task_ptr>> queue, reject_policy policy);
+            std::unique_ptr<task_queue<callable>> queue, reject_policy policy);
 
 thread_pool(int core, int max, std::chrono::minutes keep_alive,
-            std::unique_ptr<task_queue<task_ptr>> queue, reject_policy policy);
+            std::unique_ptr<task_queue<callable>> queue, reject_policy policy);
 ```
+
+**Validation**: `core_pool_size` must be **less than or equal to** `max_pool_size`.
 
 Task dispatch flow:
 
-1. If `active_count < core_pool_size`, create a new worker thread to execute the task directly
+1. If `pool_size < core_pool_size`, create a new worker thread to execute the task directly
 2. Otherwise, try to enqueue the task
-3. If enqueue fails (queue full) and `active_count < maximum_pool_size`, create a non-core worker
+3. If enqueue fails (queue full) and `pool_size < max_pool_size`, create a non-core worker
 4. Otherwise, apply the rejection policy
 
 ## 3. Class Diagram
 
 ```mermaid
 classDiagram
-    class runnable {
-        <<interface>>
-        +run() void
+    class callable {
+        -std::function~void()~ func
+        -unsigned int priority
+        +operator()() void
+        +operator bool() bool
+        +compare(other) int
     }
 
-    class lambda_runnable~F~ {
-        -F _func
-        +run() void
+    class callable_priority_compare {
+        +operator()(lhs, rhs) bool
     }
 
     class task_queue~T~ {
@@ -140,50 +158,49 @@ classDiagram
     }
 
     class fifo_task_queue~T~ {
-        -deque~T~ _queue
-        -mutex _q_mutex
-        -condition_variable _t_cond
+        -deque~T~ task_q
+        -mutex q_mutex
+        -condition_variable q_cv
+        -size_t capacity
     }
 
     class priority_task_queue~T, Compare~ {
-        -vector~T~ _queue
-        -mutex _q_mutex
-        -condition_variable _t_cond
+        -vector~T~ task_q
+        -Compare task_compare
+        -mutex q_mutex
+        -condition_variable q_cv
+        -size_t capacity
     }
 
     class thread_pool {
+        +execute(callable) void
         +execute(F&&, Args&&...) void
-        +execute_with_priority(priority, F&&, Args&&...) void
+        +execute(priority, F&&, Args&&...) void
         +shutdown() void
-        +shutdown_now() vector~task_ptr~
+        +shutdown_now() vector~callable~
         +await_termination(timeout) bool
-        +is_shutdown() bool
-        +is_terminated() bool
-        +active_count() int
-        +queue_size() size_t
-        -_core_pool_size int
-        -_maximum_pool_size int
-        -_keep_alive_time seconds
-        -_work_queue unique_ptr~task_queue~
-        -_reject_policy reject_policy
-        -_state atomic~state~
-        -_worker_count atomic~int~
-        -_main_lock mutex
-        -_termination condition_variable
+        -core_pool_size int
+        -max_pool_size int
+        -keep_alive_time seconds
+        -worker_threads vector~thread~
+        -work_queue unique_ptr~task_queue~
+        -rej_policy reject_policy
+        -pool_state atomic~state~
+        -threads_mutex mutex
+        -termination condition_variable
     }
 
-    runnable <|-- lambda_runnable~F~
     task_queue~T~ <|-- fifo_task_queue~T~
     task_queue~T~ <|-- priority_task_queue~T, Compare~
-    thread_pool --> task_queue~task_ptr~ : owns
-    thread_pool ..> runnable : executes
+    thread_pool --> task_queue~callable~ : owns
+    thread_pool ..> callable : executes
 ```
 
 ## 4. Task Queue Design
 
 ### 4.1. Poison Pill Shutdown
 
-`thread_pool::shutdown()` pushes one `nullptr` (empty `unique_ptr`) per worker into the queue. When a worker pops a `nullptr`, it treats it as a poison pill and exits. This avoids needing an interrupt mechanism like Java's `Thread.interrupt()`.
+`thread_pool::shutdown()` pushes one empty `callable` (`callable{}`) per worker into the queue, followed by `wake_all()`. When a worker pops an empty `callable`, it treats it as a poison pill and exits. This avoids needing an interrupt mechanism like Java's `Thread.interrupt()`.
 
 ## 5. Thread Pool Lifecycle
 
@@ -203,12 +220,29 @@ stateDiagram-v2
 | `STOP` | Rejects new tasks; workers exit immediately |
 | `TERMINATED` | All workers exited; `await_termination` returns |
 
-## 6. Rejection Policies
+**Destruction**: the destructor calls `shutdown()` and waits up to **30 seconds** for all workers to finish. If workers are still alive after the timeout, they are forcefully detached to prevent `std::terminate`.
+
+## 6. Exception Handling
+
+User tasks are executed inside `worker_loop`:
+
+```cpp
+if (task) {
+    try {
+        task();
+    } catch (...) {
+        // swallow exception
+    }
+}
+```
+
+All exceptions thrown by user code are caught and silently swallowed. This guarantees that a misbehaving task will **not** crash the entire process via `std::terminate`.
+
+## 7. Rejection Policies
 
 | Policy | Behavior |
 |--------|----------|
-| `abort` | Throws `std::runtime_error` |
-| `caller_runs` | Runs the task synchronously in the caller thread |
+| `abort` | Throws `rejected_execution_exception` |
+| `caller_runs` | Runs the task synchronously in the caller thread (only if pool is `running`) |
 | `discard` | Silently drops the task |
-| `discard_oldest` | Discards the oldest queued task and retries enqueue; falls back to `caller_runs` if queue is empty |
-
+| `discard_oldest` | Discards the oldest queued task and retries submission **once**; if the retry also fails (or the queue is empty), the task is silently dropped |

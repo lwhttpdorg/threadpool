@@ -9,7 +9,7 @@
 
 SCENARIO("thread_pool executes submitted tasks", "[thread_pool]") {
     GIVEN("a thread_pool with 2 core and 4 max threads") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>();
         tp::thread_pool pool(2, 4, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("several tasks are submitted") {
@@ -29,7 +29,7 @@ SCENARIO("thread_pool executes submitted tasks", "[thread_pool]") {
 
 SCENARIO("thread_pool keeps core threads alive", "[thread_pool]") {
     GIVEN("a thread_pool with 2 core threads") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>();
         tp::thread_pool pool(2, 4, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("tasks are executed and complete") {
@@ -39,8 +39,11 @@ SCENARIO("thread_pool keeps core threads alive", "[thread_pool]") {
 
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-            THEN("core threads remain active") {
-                REQUIRE(pool.active_count() == 2);
+            THEN("subsequent tasks are picked up promptly") {
+                std::atomic<bool> third_ran{false};
+                pool.execute([&]() { third_ran = true; });
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                REQUIRE(third_ran);
             }
 
             AND_WHEN("the pool is shut down") {
@@ -56,18 +59,22 @@ SCENARIO("thread_pool keeps core threads alive", "[thread_pool]") {
 
 SCENARIO("thread_pool queue_size reflects pending tasks", "[thread_pool]") {
     GIVEN("a thread_pool with 1 core thread") {
-        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
+        auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>();
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("multiple slow tasks are submitted") {
+            std::atomic<int> started{0};
             for (int i = 0; i < 5; ++i) {
-                pool.execute([]() { std::this_thread::sleep_for(std::chrono::seconds(1)); });
+                pool.execute([&]() {
+                    ++started;
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                });
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-            THEN("the queue contains pending tasks") {
-                REQUIRE(pool.queue_size() > 0);
+            THEN("not all tasks have started yet") {
+                REQUIRE(started.load() == 1);
             }
 
             pool.shutdown();

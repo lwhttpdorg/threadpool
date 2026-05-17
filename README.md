@@ -11,7 +11,8 @@
   - [4.2. Priority queue](#4.2.-priority-queue)
 - [5. Interface Reference](#5.-interface-reference)
   - [5.1. task_queue<T>](#5.1.-task_queue%3Ct%3E)
-  - [5.2. thread_pool](#5.2.-thread_pool)
+  - [5.2. callable](#5.2.-callable)
+  - [5.3. thread_pool](#5.3.-thread_pool)
 - [6. Testing](#6.-testing)
 - [7. Dependencies](#7.-dependencies)
 - [8. License](#8.-license)
@@ -24,8 +25,10 @@ All public APIs are placed under the `tp` namespace to avoid name collisions.
 ## 1. Features
 
 - **Java-like ThreadPoolExecutor**: supports `corePoolSize`, `maximumPoolSize`, `keepAliveTime`, work queue, and rejection policies
-- **Runnable interface**: similar to Java's `Runnable`, with automatic lambda wrapping and optional priority
-- **Priority tasks**: `execute_with_priority()` submits tasks with explicit priority for priority-queue ordering
+- **Callable interface**: lightweight wrapper around `std::function<void()>`, with optional priority support
+- **Automatic lambda wrapping**: `execute()` accepts any callable plus arguments, automatically bound into a task
+- **Exception safety**: exceptions thrown by user tasks are caught inside worker threads and will **not** cause `std::terminate`
+- **Priority tasks**: `execute()` submits tasks with explicit priority for priority-queue ordering
 - **Pluggable task queues**:
   - `tp::fifo_task_queue<T>` — FIFO blocking queue
   - `tp::priority_task_queue<T, Compare>` — priority blocking queue
@@ -38,15 +41,16 @@ All public APIs are placed under the `tp` namespace to avoid name collisions.
 ```shell
 .
 ├── include/
-│   ├── runnable.hpp          # Runnable interface + lambda wrapper
+│   ├── callable.hpp          # Callable task wrapper + priority support
 │   ├── task_queue.hpp        # Task queue interface + FIFO / priority implementations
 │   └── thread_pool.hpp       # ThreadPool implementation
 ├── tests/
 │   ├── test_fifo_task_queue.cpp
 │   ├── test_priority_task_queue.cpp
 │   ├── test_thread_pool_basic.cpp
-│   ├── test_thread_pool_shutdown.cpp
-│   └── test_thread_pool_reject.cpp
+│   ├── test_thread_pool_priority.cpp
+│   ├── test_thread_pool_reject.cpp
+│   └── test_thread_pool_shutdown.cpp
 ├── CMakeLists.txt
 ├── meson.build
 ├── meson.options
@@ -78,7 +82,7 @@ meson compile -C meson-build-debug -j$(nproc)
 ```cpp
 #include <iostream>
 #include <memory>
-#include "task_queue.hpp"
+#include "threadpool/task_queue.hpp"
 #include "threadpool/thread_pool.hpp"
 
 void task_func(int id) {
@@ -92,7 +96,7 @@ struct task_obj {
 };
 
 int main() {
-    auto work_queue = std::make_unique<tp::fifo_task_queue<tp::work_task>>();
+    auto work_queue = std::make_unique<tp::fifo_task_queue<tp::callable>>();
     tp::thread_pool pool(4, 8, std::chrono::seconds(60), std::move(work_queue));
 
     // 1. Stateless lambda
@@ -124,17 +128,17 @@ int main() {
 #include <iostream>
 #include <memory>
 
-#include "task_queue.hpp"
+#include "threadpool/task_queue.hpp"
 #include "threadpool/thread_pool.hpp"
 
 int main() {
-    auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>();
+    auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable, tp::callable_priority_compare>>();
     tp::thread_pool pool(4, 8, std::chrono::seconds(60), std::move(work_queue));
 
     // Higher priority value = earlier execution
-    pool.execute_with_priority(1, [] { std::cout << "low\n"; });
-    pool.execute_with_priority(5, [] { std::cout << "high\n"; });
-    pool.execute_with_priority(3, [] { std::cout << "medium\n"; });
+    pool.execute(1, [] { std::cout << "low\n"; });
+    pool.execute(5, [] { std::cout << "high\n"; });
+    pool.execute(3, [] { std::cout << "medium\n"; });
 
     pool.shutdown();
     pool.await_termination(std::chrono::seconds(5));
@@ -158,18 +162,32 @@ int main() {
 
 > All types in this section reside in the `tp` namespace.
 
-### 5.2. thread_pool
+### 5.2. callable
+
+`callable` is a lightweight task wrapper holding a `std::function<void()>` and an optional `unsigned int` priority.
+
+```cpp
+tp::callable task([] { /* ... */ });               // default priority (LOWEST)
+tp::callable task([] { /* ... */ }, 10);           // explicit priority
+```
+
+- `LOWEST_PRIORITY` = `0`
+- `HIGHEST_PRIORITY` = `std::numeric_limits<unsigned int>::max()`
+
+### 5.3. thread_pool
+
+`thread_pool` is **non-copyable and non-movable**.
 
 | Method | Description |
 |--------|-------------|
-| `execute(F&&, Args&&...)` | Submit a task (lambdas, function objects, etc. are auto-wrapped) |
-| `execute_with_priority(priority, F&&, Args&&...)` | Submit a task with explicit priority (higher value = earlier execution) |
+| `execute(callable)` | Submit a pre-built `callable` task |
+| `execute(F&&, Args&&...)` | Submit any callable with arguments (auto-wrapped) |
+| `execute(priority, F&&, Args&&...)` | Submit with explicit priority |
 | `shutdown()` | Graceful shutdown: no new tasks accepted, queued tasks are executed |
 | `shutdown_now()` | Immediate shutdown: returns a list of unexecuted tasks |
 | `await_termination(timeout)` | Wait for all threads to exit (`std::chrono::seconds`, negative = infinite) |
-| `is_shutdown()` / `is_terminated()` | State queries |
-| `active_count()` | Current number of active worker threads |
-| `queue_size()` | Number of pending tasks in the queue |
+
+**Destruction behavior**: the destructor calls `shutdown()` and waits up to **30 seconds** for all workers to finish. If workers are still alive after the timeout (e.g. tasks are deadlocked), they are forcefully detached to prevent `std::terminate`.
 
 ## 6. Testing
 

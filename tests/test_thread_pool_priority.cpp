@@ -11,7 +11,7 @@
 
 SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
     GIVEN("a single-threaded pool with a bounded priority task queue") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(3);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable, tp::callable_priority_compare>>(3);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("tasks with different priorities are submitted out of order") {
@@ -41,15 +41,15 @@ SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
             }
 
             // At this point the worker thread is blocked, so all new tasks go into the queue
-            pool.execute_with_priority(1, [&]() {
+            pool.execute(1, [&]() {
                 std::scoped_lock<std::mutex> lock(order_mutex);
                 execution_order.push_back(1);
             });
-            pool.execute_with_priority(3, [&]() {
+            pool.execute(3, [&]() {
                 std::scoped_lock<std::mutex> lock(order_mutex);
                 execution_order.push_back(3);
             });
-            pool.execute_with_priority(2, [&]() {
+            pool.execute(2, [&]() {
                 std::scoped_lock<std::mutex> lock(order_mutex);
                 execution_order.push_back(2);
             });
@@ -74,9 +74,9 @@ SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
     }
 }
 
-SCENARIO("thread_pool execute_with_priority overrides default priority", "[thread_pool]") {
+SCENARIO("thread_pool execute overrides default priority", "[thread_pool]") {
     GIVEN("a single-threaded pool with a bounded priority task queue") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(3);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable, tp::callable_priority_compare>>(3);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("a default-priority task and a high-priority task are submitted") {
@@ -107,7 +107,7 @@ SCENARIO("thread_pool execute_with_priority overrides default priority", "[threa
                 std::scoped_lock<std::mutex> lock(order_mutex);
                 execution_order.push_back(0);
             });
-            pool.execute_with_priority(5, [&]() {
+            pool.execute(5, [&]() {
                 std::scoped_lock<std::mutex> lock(order_mutex);
                 execution_order.push_back(5);
             });
@@ -132,7 +132,7 @@ SCENARIO("thread_pool execute_with_priority overrides default priority", "[threa
 
 SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]") {
     GIVEN("a pool with core=1, max=2 and a bounded priority queue of capacity 1") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(1);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable, tp::callable_priority_compare>>(1);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("a high-priority task is submitted while queue is full") {
@@ -162,13 +162,13 @@ SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]
             }
 
             // Enqueue a low-priority task (queue becomes full)
-            pool.execute_with_priority(1, [&]() {
+            pool.execute(1, [&]() {
                 std::scoped_lock<std::mutex> lock(order_mutex);
                 execution_order.push_back(1);
             });
 
             // Queue is full, a non-core worker will be spawned to run the high-priority task directly
-            pool.execute_with_priority(3, [&]() {
+            pool.execute(3, [&]() {
                 {
                     std::scoped_lock<std::mutex> lock(order_mutex);
                     execution_order.push_back(3);
@@ -201,7 +201,7 @@ SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]
 
 SCENARIO("thread_pool rejects task when queue is full and max threads reached", "[thread_pool]") {
     GIVEN("a pool with core=1, max=1 and a bounded priority queue of capacity 1") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::work_task, tp::work_task_priority_compare>>(1);
+        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable, tp::callable_priority_compare>>(1);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue),
                              tp::thread_pool::reject_policy::abort);
 
@@ -228,11 +228,10 @@ SCENARIO("thread_pool rejects task when queue is full and max threads reached", 
             }
 
             // Enqueue a task (queue becomes full)
-            pool.execute_with_priority(1, [&]() {});
+            pool.execute(1, [&]() {});
 
             THEN("the next task is rejected with an exception") {
-                REQUIRE_THROWS_AS(pool.execute_with_priority(3, [&]() {}),
-                                  tp::thread_pool::rejected_execution_exception);
+                REQUIRE_THROWS_AS(pool.execute(3, [&]() {}), tp::thread_pool::rejected_execution_exception);
             }
 
             {

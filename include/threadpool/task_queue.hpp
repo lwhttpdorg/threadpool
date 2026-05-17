@@ -37,160 +37,160 @@ namespace tp {
     template<typename T>
     class fifo_task_queue: public task_queue<T> {
     public:
-        explicit fifo_task_queue(size_t capacity = std::numeric_limits<size_t>::max()) : _capacity(capacity) {
+        explicit fifo_task_queue(size_t _capacity = std::numeric_limits<size_t>::max()) : capacity(_capacity) {
         }
 
         // Non-blocking push (move): returns false if queue is full
         bool try_push(T &&item) override {
             {
-                std::unique_lock<std::mutex> lock(_q_mutex);
-                if (_capacity != std::numeric_limits<size_t>::max() && _queue.size() >= _capacity) {
+                std::unique_lock<std::mutex> lock(q_mutex);
+                if (capacity != std::numeric_limits<size_t>::max() && task_q.size() >= capacity) {
                     return false;
                 }
-                _queue.push_back(std::move(item));
+                task_q.push_back(std::move(item));
             }
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return true;
         }
 
         // Blocking pop: waits until an item is available
         T pop() override {
-            std::unique_lock<std::mutex> lock(_q_mutex);
-            while (_queue.empty()) {
-                _t_cond.wait(lock, [this] { return !_queue.empty(); });
+            std::unique_lock<std::mutex> lock(q_mutex);
+            while (task_q.empty()) {
+                q_cv.wait(lock, [this] { return !task_q.empty(); });
             }
-            T item = std::move(_queue.front());
-            _queue.pop_front();
+            T item = std::move(task_q.front());
+            task_q.pop_front();
             lock.unlock();
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return item;
         }
 
         // Non-blocking pop: returns false if no item available
         bool try_pop(T &item) override {
-            std::unique_lock<std::mutex> lock(_q_mutex);
-            if (_queue.empty()) {
+            std::unique_lock<std::mutex> lock(q_mutex);
+            if (task_q.empty()) {
                 return false;
             }
-            item = std::move(_queue.front());
-            _queue.pop_front();
+            item = std::move(task_q.front());
+            task_q.pop_front();
             lock.unlock();
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return true;
         }
 
         // Blocking pop with timeout: returns false if timeout
         bool pop_with_timeout(T &item, std::chrono::milliseconds timeout) override {
-            std::unique_lock<std::mutex> lock(_q_mutex);
-            bool has_item = _t_cond.wait_for(lock, timeout, [this] { return !_queue.empty(); });
+            std::unique_lock<std::mutex> lock(q_mutex);
+            bool has_item = q_cv.wait_for(lock, timeout, [this] { return !task_q.empty(); });
             if (!has_item) {
                 return false;
             }
-            item = std::move(_queue.front());
-            _queue.pop_front();
+            item = std::move(task_q.front());
+            task_q.pop_front();
             lock.unlock();
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return true;
         }
 
         // Get total size of queue (snapshot only)
         size_t size() const override {
-            std::lock_guard<std::mutex> lock(_q_mutex);
-            return _queue.size();
+            std::lock_guard<std::mutex> lock(q_mutex);
+            return task_q.size();
         }
 
         // Wake up all threads waiting on pop/pop_with_timeout
         void wake_all() override {
-            _t_cond.notify_all();
+            q_cv.notify_all();
         }
 
     private:
-        std::deque<T> _queue;
-        mutable std::mutex _q_mutex;
-        std::condition_variable _t_cond;
-        size_t _capacity = std::numeric_limits<size_t>::max();
+        std::deque<T> task_q;
+        mutable std::mutex q_mutex;
+        std::condition_variable q_cv;
+        size_t capacity = std::numeric_limits<size_t>::max();
     };
 
     // Priority blocking task queue
     template<typename T, typename Compare = std::less<T>>
     class priority_task_queue: public task_queue<T> {
     public:
-        explicit priority_task_queue(size_t capacity = std::numeric_limits<size_t>::max()) : _capacity(capacity) {
+        explicit priority_task_queue(size_t _capacity = std::numeric_limits<size_t>::max()) : capacity(_capacity) {
         }
 
         // Non-blocking push (move): returns false if queue is full
         bool try_push(T &&item) override {
             {
-                std::unique_lock<std::mutex> lock(_q_mutex);
-                if (_capacity != std::numeric_limits<size_t>::max() && _queue.size() >= _capacity) {
+                std::unique_lock<std::mutex> lock(q_mutex);
+                if (capacity != std::numeric_limits<size_t>::max() && task_q.size() >= capacity) {
                     return false;
                 }
-                _queue.push_back(std::move(item));
-                std::push_heap(_queue.begin(), _queue.end(), _compare);
+                task_q.push_back(std::move(item));
+                std::push_heap(task_q.begin(), task_q.end(), task_compare);
             }
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return true;
         }
 
         // Blocking pop: waits until an item is available
         T pop() override {
-            std::unique_lock<std::mutex> lock(_q_mutex);
-            while (_queue.empty()) {
-                _t_cond.wait(lock, [this] { return !_queue.empty(); });
+            std::unique_lock<std::mutex> lock(q_mutex);
+            while (task_q.empty()) {
+                q_cv.wait(lock, [this] { return !task_q.empty(); });
             }
-            std::pop_heap(_queue.begin(), _queue.end(), _compare);
-            T item = std::move(_queue.back());
-            _queue.pop_back();
+            std::pop_heap(task_q.begin(), task_q.end(), task_compare);
+            T item = std::move(task_q.back());
+            task_q.pop_back();
             lock.unlock();
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return item;
         }
 
         // Non-blocking pop: returns false if no item available
         bool try_pop(T &item) override {
-            std::unique_lock<std::mutex> lock(_q_mutex);
-            if (_queue.empty()) {
+            std::unique_lock<std::mutex> lock(q_mutex);
+            if (task_q.empty()) {
                 return false;
             }
-            std::pop_heap(_queue.begin(), _queue.end(), _compare);
-            item = std::move(_queue.back());
-            _queue.pop_back();
+            std::pop_heap(task_q.begin(), task_q.end(), task_compare);
+            item = std::move(task_q.back());
+            task_q.pop_back();
             lock.unlock();
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return true;
         }
 
         // Blocking pop with timeout: returns false if timeout
         bool pop_with_timeout(T &item, std::chrono::milliseconds timeout) override {
-            std::unique_lock<std::mutex> lock(_q_mutex);
-            bool has_item = _t_cond.wait_for(lock, timeout, [this] { return !_queue.empty(); });
+            std::unique_lock<std::mutex> lock(q_mutex);
+            bool has_item = q_cv.wait_for(lock, timeout, [this] { return !task_q.empty(); });
             if (!has_item) {
                 return false;
             }
-            std::pop_heap(_queue.begin(), _queue.end(), _compare);
-            item = std::move(_queue.back());
-            _queue.pop_back();
+            std::pop_heap(task_q.begin(), task_q.end(), task_compare);
+            item = std::move(task_q.back());
+            task_q.pop_back();
             lock.unlock();
-            _t_cond.notify_one();
+            q_cv.notify_one();
             return true;
         }
 
         // Get total size of queue (snapshot only)
         size_t size() const override {
-            std::lock_guard<std::mutex> lock(_q_mutex);
-            return _queue.size();
+            std::lock_guard<std::mutex> lock(q_mutex);
+            return task_q.size();
         }
 
         // Wake up all threads waiting on pop/pop_with_timeout
         void wake_all() override {
-            _t_cond.notify_all();
+            q_cv.notify_all();
         }
 
     private:
-        std::vector<T> _queue;
-        Compare _compare;
-        mutable std::mutex _q_mutex;
-        std::condition_variable _t_cond;
-        size_t _capacity = std::numeric_limits<size_t>::max();
+        std::vector<T> task_q;
+        Compare task_compare;
+        mutable std::mutex q_mutex;
+        std::condition_variable q_cv;
+        size_t capacity = std::numeric_limits<size_t>::max();
     };
 } // namespace tp
