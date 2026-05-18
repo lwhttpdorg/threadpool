@@ -14,8 +14,11 @@ endif()
 include(CTest)
 include(Catch)
 
-# Helper: apply ASAN to a target (GNU/Clang only)
+# Helper: apply ASAN to a target (GNU/Clang only, silently skipped on MSVC)
 function(apply_asan_to_target tgt)
+  if(MSVC)
+    return()
+  endif()
   target_compile_options(
     ${tgt}
     PRIVATE -fsanitize=address

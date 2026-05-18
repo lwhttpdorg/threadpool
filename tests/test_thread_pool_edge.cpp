@@ -15,9 +15,7 @@ SCENARIO("thread_pool constructor rejects invalid pool sizes", "[thread_pool]") 
     GIVEN("core_pool_size > max_pool_size") {
         THEN("construction throws std::invalid_argument") {
             auto wq = std::make_unique<tp::fifo_task_queue<tp::callable>>();
-            REQUIRE_THROWS_AS(
-                tp::thread_pool(4, 2, std::chrono::seconds(1), std::move(wq)),
-                std::invalid_argument);
+            REQUIRE_THROWS_AS(tp::thread_pool(4, 2, std::chrono::seconds(1), std::move(wq)), std::invalid_argument);
         }
     }
 }
