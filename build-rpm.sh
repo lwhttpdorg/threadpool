@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-VERSION=$(sed -n 's/^project(ThreadPool VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+VERSION=$(awk '/^project\(/,/\)/ { if (/VERSION/) { gsub(/.*VERSION */, ""); gsub(/[^0-9.].*/, ""); print; exit } }' CMakeLists.txt)
 
 if [[ $CLEAN -eq 1 ]]; then
     echo "Cleaning build artifacts..."
