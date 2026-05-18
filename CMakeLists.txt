@@ -52,3 +52,11 @@ configure_package_config_file(
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ThreadPoolConfig.cmake
               ${CMAKE_CURRENT_BINARY_DIR}/ThreadPoolConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ThreadPool)
+
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/ThreadPool.pc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/ThreadPool.pc
+  @ONLY)
+
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ThreadPool.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)

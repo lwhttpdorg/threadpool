@@ -1,0 +1,8 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: threadpool
+Description: C++ header-only thread pool library
+Version: @PROJECT_VERSION@
+Libs: -pthread
+Cflags: -I${includedir}

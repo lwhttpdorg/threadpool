@@ -3,6 +3,9 @@
 <!-- TOC -->
 - [1. Features](#1.-features)
 - [2. Quick Start](#2.-quick-start)
+  - [2.1. CMake](#2.1.-cmake)
+  - [2.2. Meson](#2.2.-meson)
+  - [2.3. Code](#2.3.-code)
 - [3. Build](#3.-build)
 - [4. Testing](#4.-testing)
 - [5. Dependencies](#5.-dependencies)
@@ -24,6 +27,36 @@ All public APIs are placed under the `tp` namespace. See [DESIGN.md](DESIGN.md) 
 - Dual build systems: CMake (≥3.11) and Meson (≥1.1)
 
 ## 2. Quick Start
+
+### 2.1. CMake
+
+```cmake
+cmake_minimum_required(VERSION 3.11)
+project(myapp)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Threads REQUIRED)
+find_package(ThreadPool REQUIRED)
+
+add_executable(myapp main.cpp)
+target_link_libraries(myapp PRIVATE tp::thread_pool)
+```
+
+### 2.2. Meson
+
+```meson
+project('myapp', 'cpp', default_options: ['cpp_std=c++17'])
+
+threadpool_dep = dependency('ThreadPool')
+
+executable('myapp', 'main.cpp',
+    dependencies: threadpool_dep
+)
+```
+
+### 2.3. Code
 
 ```cpp
 #include "threadpool/task_queue.hpp"
