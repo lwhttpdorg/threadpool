@@ -1,3 +1,17 @@
+catch2_dep = dependency(
+    'catch2-with-main',
+    version: '>=3.0',
+    fallback: ['catch2', 'catch2_with_main_dep'],
+)
+
+# Code coverage (GNU only)
+cover_compile_args = []
+cover_link_args = []
+if get_option('enable_codecover')
+    cover_compile_args = ['--coverage', '-O0', '-g']
+    cover_link_args = ['--coverage']
+endif
+
 test_srcs = [
     'test_fifo_task_queue.cpp',
     'test_priority_task_queue.cpp',
@@ -5,34 +19,17 @@ test_srcs = [
     'test_thread_pool_shutdown.cpp',
     'test_thread_pool_reject.cpp',
     'test_thread_pool_priority.cpp',
+    'test_thread_pool_edge.cpp',
 ]
-
-test_cpp_args = []
-test_link_args = []
-
-if get_option('enable_asan')
-    test_cpp_args += [
-        '-fsanitize=address',
-        '-fsanitize=undefined',
-        '-fno-sanitize-recover=all',
-        '-fsanitize=float-divide-by-zero',
-        '-fsanitize=float-cast-overflow',
-        '-fno-sanitize=null',
-        '-fno-sanitize=alignment',
-    ]
-    test_link_args += [
-        '-fsanitize=address',
-        '-fsanitize=undefined',
-    ]
-endif
 
 foreach src : test_srcs
     test_name = src.substring(0, -4)
-    exe = executable(test_name, src,
-        include_directories : thread_pool_inc,
-        dependencies : [catch2_dep, dependency('threads')],
-        cpp_args : test_cpp_args,
-        link_args : test_link_args,
+    exe = executable(
+        test_name,
+        src,
+        dependencies: [thread_pool_dep, catch2_dep],
+        cpp_args: cover_compile_args,
+        link_args: cover_link_args,
     )
     test(test_name, exe)
 endforeach

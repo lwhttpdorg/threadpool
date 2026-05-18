@@ -56,9 +56,7 @@ namespace tp {
         // Blocking pop: waits until an item is available
         T pop() override {
             std::unique_lock<std::mutex> lock(q_mutex);
-            while (task_q.empty()) {
-                q_cv.wait(lock, [this] { return !task_q.empty(); });
-            }
+            q_cv.wait(lock, [this] { return !task_q.empty(); });
             T item = std::move(task_q.front());
             task_q.pop_front();
             lock.unlock();
@@ -135,9 +133,7 @@ namespace tp {
         // Blocking pop: waits until an item is available
         T pop() override {
             std::unique_lock<std::mutex> lock(q_mutex);
-            while (task_q.empty()) {
-                q_cv.wait(lock, [this] { return !task_q.empty(); });
-            }
+            q_cv.wait(lock, [this] { return !task_q.empty(); });
             std::pop_heap(task_q.begin(), task_q.end(), task_compare);
             T item = std::move(task_q.back());
             task_q.pop_back();

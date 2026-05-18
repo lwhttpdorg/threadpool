@@ -1,6 +1,8 @@
 # Build directories
 build/
+meson-build/
 meson-build-*/
+cmake-build/
 cmake-build-*/
 out/
 

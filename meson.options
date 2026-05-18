@@ -1,2 +1,7 @@
-option('build_tests', type : 'boolean', value : false, description : 'Build tests')
-option('enable_asan', type : 'boolean', value : false, description : 'Enable AddressSanitizer for tests')
+option('build_tests', type: 'boolean', value: false, description: 'Build tests')
+option(
+    'enable_codecover',
+    type: 'boolean',
+    value: false,
+    description: 'Enable code coverage (GNU only)',
+)

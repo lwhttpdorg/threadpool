@@ -19,6 +19,8 @@
 #include "threadpool/task_queue.hpp"
 
 namespace tp {
+    constexpr const char *THREAD_POOL_NOT_RUN = "thread pool is not running";
+    constexpr const char *THREAD_POOL_FULL = "queue is full and max threads reached";
 
     // C++ thread pool modeled after java.util.concurrent.ThreadPoolExecutor.
     class thread_pool {
@@ -40,7 +42,7 @@ namespace tp {
             discard_oldest // ThreadPoolExecutor.DiscardOldestPolicy
         };
 
-        thread_pool(int _core_pool_size, int _max_pool_size, std::chrono::seconds _keep_alive_time,
+        thread_pool(unsigned int _core_pool_size, unsigned int _max_pool_size, std::chrono::seconds _keep_alive_time,
                     std::unique_ptr<task_queue<callable>> _work_queue,
                     reject_policy _rej_policy = reject_policy::abort) :
             core_pool_size(_core_pool_size), max_pool_size(_max_pool_size), keep_alive_time(_keep_alive_time),
@@ -48,9 +50,10 @@ namespace tp {
             if (_core_pool_size > _max_pool_size) {
                 throw std::invalid_argument("core pool size must be less than or equal to max pool size");
             }
+            start_core_threads();
         }
 
-        thread_pool(int _core_pool_size, int _max_pool_size, std::chrono::minutes _keep_alive_time,
+        thread_pool(unsigned int _core_pool_size, unsigned int _max_pool_size, std::chrono::minutes _keep_alive_time,
                     std::unique_ptr<task_queue<callable>> _work_queue,
                     reject_policy _rej_policy = reject_policy::abort) :
             core_pool_size(_core_pool_size), max_pool_size(_max_pool_size),
@@ -59,21 +62,17 @@ namespace tp {
             if (_core_pool_size > _max_pool_size) {
                 throw std::invalid_argument("core pool size must be less than or equal to max pool size");
             }
+            start_core_threads();
         }
 
+        // The destructor calls shutdown_now() and unconditionally joins all worker
+        // threads. No threads are ever detached, preventing use-after-free and
+        // memory leaks. If tasks are deadlocked, the destructor will block
+        // indefinitely — callers must ensure tasks are well-behaved or call
+        // shutdown()/await_termination() explicitly before destruction.
         ~thread_pool() {
-            shutdown();
-            if (!await_termination(std::chrono::seconds(30))) {
-                // Force cleanup to avoid std::terminate on dangling joinable threads.
-                shutdown_now();
-                std::lock_guard<std::mutex> lock(threads_mutex);
-                for (auto &t: worker_threads) {
-                    if (t.joinable()) {
-                        t.detach();
-                    }
-                }
-                worker_threads.clear();
-            }
+            shutdown_now();
+            join_all_threads();
         }
 
         thread_pool(const thread_pool &) = delete;
@@ -116,27 +115,32 @@ namespace tp {
         void shutdown() {
             state expected = state::running;
             if (pool_state.compare_exchange_strong(expected, state::shutdown)) {
-                wake_idle_workers();
+                // Push low-priority poison pills so real tasks are consumed first.
+                push_poison_pills(callable(callable::LOWEST_PRIORITY));
             }
         }
 
         std::vector<callable> shutdown_now() {
             pool_state.store(state::stop);
-            wake_idle_workers();
 
+            // Drain remaining tasks BEFORE waking workers, so that poison pills
+            // are not consumed by the drain loop.
             std::vector<callable> remaining;
-            callable task{};
+            callable task(callable::LOWEST_PRIORITY);
             while (work_queue->try_pop(task)) {
-                if (task) {
+                if (!task.is_poison_pill()) {
                     remaining.push_back(std::move(task));
                 }
             }
+
+            // Push high-priority poison pills for immediate worker exit.
+            push_poison_pills(callable(callable::HIGHEST_PRIORITY));
             return remaining;
         }
 
         bool await_termination(std::chrono::seconds timeout) {
             std::unique_lock<std::mutex> lock(threads_mutex);
-            auto all_workers_stopped = [this] { return worker_threads.empty(); };
+            auto all_workers_stopped = [this] { return active_worker_count == 0; };
             bool terminated = false;
             if (timeout.count() < 0) {
                 termination.wait(lock, all_workers_stopped);
@@ -146,200 +150,223 @@ namespace tp {
                 terminated = termination.wait_for(lock, timeout, all_workers_stopped);
             }
             if (terminated) {
-                join_all_workers_locked();
+                join_all_workers_locked(lock);
             }
             return terminated;
         }
 
     private:
-        int pool_size() const {
+        // Eagerly create all core threads at construction time.
+        void start_core_threads() {
             std::lock_guard<std::mutex> lock(threads_mutex);
-            return static_cast<int>(worker_threads.size());
+            core_threads.reserve(core_pool_size);
+            for (unsigned int i = 0; i < core_pool_size; ++i) {
+                core_threads.emplace_back([this]() {
+                    core_worker_loop();
+                    {
+                        std::lock_guard<std::mutex> worker_lock(threads_mutex);
+                        --active_worker_count;
+                    }
+                    termination.notify_all();
+                });
+                ++active_worker_count;
+            }
         }
 
-        void wake_idle_workers() {
+        // Pushes one poison pill per active worker into the queue, then wakes all
+        // blocked consumers. If the queue is full some pills may fail to enqueue,
+        // but wake_all() ensures workers re-check the pool state and exit.
+        void push_poison_pills(callable pill) {
             std::lock_guard<std::mutex> lock(threads_mutex);
-            const int work_thread_count = static_cast<int>(worker_threads.size());
-            for (int i = 0; i < work_thread_count; ++i) {
-                work_queue->try_push(callable{});
+            for (unsigned int i = 0; i < active_worker_count; ++i) {
+                work_queue->try_push(callable(pill));
             }
             work_queue->wake_all();
         }
 
-        void remove_current_worker_locked() {
-            const auto id = std::this_thread::get_id();
-            for (auto it = worker_threads.begin(); it != worker_threads.end(); ++it) {
-                if (it->get_id() == id) {
-                    if (it->joinable()) {
-                        it->detach();
-                    }
-                    worker_threads.erase(it);
-                    break;
-                }
-            }
-        }
-
-        bool try_start_worker(callable &task) {
+        bool try_start_non_core_worker(callable &task) {
             const state s = pool_state.load();
             if (s != state::running) {
                 return false;
             }
-            if (task && s == state::shutdown) {
-                return false;
-            }
             try {
                 std::lock_guard<std::mutex> lock(threads_mutex);
-                if (static_cast<int>(worker_threads.size()) >= max_pool_size) {
+                if (active_worker_count >= max_pool_size) {
                     return false;
                 }
-                worker_threads.emplace_back([this, t = std::move(task)]() mutable {
-                    worker_loop(std::move(t));
-                    std::lock_guard<std::mutex> worker_lock(threads_mutex);
-                    remove_current_worker_locked();
+                non_core_threads.emplace_back([this, t = std::move(task)]() mutable {
+                    non_core_worker_loop(std::move(t));
+                    {
+                        std::lock_guard<std::mutex> worker_lock(threads_mutex);
+                        --active_worker_count;
+                    }
                     termination.notify_all();
                 });
+                ++active_worker_count;
                 return true;
             }
             catch (...) {
-                // If thread creation fails (e.g. resource limit), the task has
-                // already been moved into the lambda capture and is lost. This
-                // is an extreme out-of-memory situation.
                 return false;
             }
         }
 
-        // Mirrors ThreadPoolExecutor.execute() submission path.
         void submit_task(callable task) {
-            state s = pool_state.load();
-            if (s != state::running) {
-                reject(task, "thread pool is not running");
+            if (pool_state.load() != state::running) {
+                reject_task(task, THREAD_POOL_NOT_RUN);
                 return;
             }
 
-            bool discard_oldest_attempted = false;
-            for (;;) {
-                const int current_size = pool_size();
-
-                if (current_size < core_pool_size && try_start_worker(task)) {
-                    return;
-                }
-
-                if (work_queue->try_push(std::move(task))) {
-                    if (pool_size() == 0 && pool_state.load() == state::running) {
-                        callable empty_task{};
-                        try_start_worker(empty_task);
-                    }
-                    return;
-                }
-
-                if (current_size < max_pool_size && try_start_worker(task)) {
-                    return;
-                }
-
-                if (rej_policy == reject_policy::discard_oldest && !discard_oldest_attempted
-                    && pool_state.load() == state::running) {
-                    callable oldest{};
-                    if (work_queue->try_pop(oldest)) {
-                        discard_oldest_attempted = true;
-                        continue;
-                    }
-                }
-
-                reject(task, "queue is full and max threads reached");
+            // Step 1: try to enqueue
+            if (work_queue->try_push(std::move(task))) {
                 return;
             }
+
+            // Step 2: queue full — try to start a non-core worker
+            if (try_start_non_core_worker(task)) {
+                return;
+            }
+
+            // Step 3: apply rejection policy
+            if (rej_policy == reject_policy::discard_oldest && pool_state.load() == state::running) {
+                callable oldest(callable::LOWEST_PRIORITY);
+                if (work_queue->try_pop(oldest)) {
+                    // Retry enqueue once after discarding oldest
+                    if (work_queue->try_push(std::move(task))) {
+                        return;
+                    }
+                }
+            }
+
+            reject_task(task, THREAD_POOL_FULL);
         }
 
-        void join_all_workers_locked() {
-            for (auto &t: worker_threads) {
+        void join_all_threads() {
+            std::unique_lock<std::mutex> lock(threads_mutex);
+            std::vector<std::thread> to_join;
+            to_join.reserve(core_threads.size() + non_core_threads.size());
+            for (auto &t: core_threads) {
+                to_join.push_back(std::move(t));
+            }
+            core_threads.clear();
+            for (auto &t: non_core_threads) {
+                to_join.push_back(std::move(t));
+            }
+            non_core_threads.clear();
+            lock.unlock();
+
+            for (auto &t: to_join) {
                 if (t.joinable()) {
                     t.join();
                 }
             }
-            worker_threads.clear();
         }
 
-        void worker_loop(callable task) {
-            for (;;) {
-                if (task) {
-                    try {
-                        task();
-                    }
-                    catch (...) {
-                        // Swallow user exceptions to prevent std::terminate.
-                    }
+        void join_all_workers_locked(std::unique_lock<std::mutex> &lock) {
+            std::vector<std::thread> to_join;
+            to_join.reserve(core_threads.size() + non_core_threads.size());
+            for (auto &t: core_threads) {
+                to_join.push_back(std::move(t));
+            }
+            core_threads.clear();
+            for (auto &t: non_core_threads) {
+                to_join.push_back(std::move(t));
+            }
+            non_core_threads.clear();
+            lock.unlock();
+
+            for (auto &t: to_join) {
+                if (t.joinable()) {
+                    t.join();
                 }
+            }
+            lock.lock();
+        }
+
+        // Core worker: blocks indefinitely on the queue, exits only on shutdown/stop.
+        void core_worker_loop() {
+            for (;;) {
+                callable task = work_queue->pop();
 
                 const state s = pool_state.load();
                 if (s == state::stop) {
                     break;
                 }
 
-                task = callable{};
-
-                if (s == state::shutdown) {
-                    if (!fetch_task(task, fetch_mode::non_blocking)) {
-                        break;
-                    }
-                    continue;
-                }
-
-                if (pool_size() > core_pool_size) {
-                    const auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(keep_alive_time);
-                    if (fetch_task(task, fetch_mode::timed, timeout)) {
-                        continue;
-                    }
-                    if (pool_size() <= core_pool_size) {
-                        continue;
-                    }
+                if (task.is_poison_pill()) {
+                    // Poison pill — exit signal
                     break;
                 }
 
-                if (!fetch_task(task, fetch_mode::blocking)) {
-                    break;
+                try {
+                    task();
+                }
+                catch (...) {
+                    // Swallow user exceptions to prevent std::terminate.
                 }
             }
         }
 
-        enum class fetch_mode { non_blocking, blocking, timed };
-
-        bool fetch_task(callable &task, fetch_mode mode,
-                        std::chrono::milliseconds timeout = std::chrono::milliseconds::zero()) {
-            bool got = false;
-            switch (mode) {
-                case fetch_mode::non_blocking:
-                    got = work_queue->try_pop(task);
-                    break;
-                case fetch_mode::blocking:
-                    task = work_queue->pop();
-                    got = true;
-                    break;
-                case fetch_mode::timed:
-                    got = work_queue->pop_with_timeout(task, timeout);
-                    break;
+        // Non-core worker: executes its initial task, then polls with timeout.
+        void non_core_worker_loop(callable task) {
+            if (!task.is_poison_pill()) {
+                try {
+                    task();
+                }
+                catch (...) {
+                }
             }
-            return got && static_cast<bool>(task);
+
+            for (;;) {
+                const state s = pool_state.load();
+                if (s == state::stop) {
+                    break;
+                }
+
+                // Timed wait — exit if idle too long
+                task = callable(callable::LOWEST_PRIORITY);
+                const auto timeout = std::chrono::duration_cast<std::chrono::milliseconds>(keep_alive_time);
+                if (!work_queue->pop_with_timeout(task, timeout)) {
+                    break; // idle timeout, non-core thread exits
+                }
+                if (task.is_poison_pill()) {
+                    // Poison pill — exit signal
+                    break;
+                }
+
+                try {
+                    task();
+                }
+                catch (...) {
+                }
+            }
         }
 
-        void reject(callable &task, const std::string &reason) {
+        void reject_task(callable &task, const std::string &reason) {
             switch (rej_policy) {
                 case reject_policy::abort:
                     throw rejected_execution_exception("Task rejected: " + reason);
                 case reject_policy::caller_runs:
-                    if (pool_state.load() == state::running && task) {
+                    if (pool_state.load() == state::running && !task.is_poison_pill()) {
                         task();
                     }
                     break;
                 case reject_policy::discard:
+                    task = callable(callable::LOWEST_PRIORITY);
+                    break;
                 case reject_policy::discard_oldest:
+                    task = callable(callable::LOWEST_PRIORITY);
                     break;
             }
         }
 
-        int core_pool_size;
-        int max_pool_size;
+        unsigned int core_pool_size;
+        unsigned int max_pool_size;
         std::chrono::seconds keep_alive_time;
-        std::vector<std::thread> worker_threads;
+
+        std::vector<std::thread> core_threads;     // created eagerly at construction
+        std::vector<std::thread> non_core_threads; // created on demand, exit after keep_alive_time
+        unsigned int active_worker_count{0};
+
         std::unique_ptr<task_queue<callable>> work_queue;
         reject_policy rej_policy;
 
