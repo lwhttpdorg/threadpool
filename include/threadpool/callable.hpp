@@ -16,7 +16,7 @@ namespace tp {
         explicit callable(unsigned int _priority) noexcept : func(nullptr), priority(_priority) {
         }
 
-        explicit callable(std::function<void(void)> _func) : func(std::move(_func)), priority(LOWEST_PRIORITY) {
+        explicit callable(std::function<void(void)> _func) : func(std::move(_func)), priority(LOWEST_PRIORITY + 1U) {
         }
 
         callable(std::function<void(void)> _func, unsigned int _priority) :
@@ -57,7 +57,7 @@ namespace tp {
         unsigned int priority = 0;
     };
 
-    struct callable_priority_compare {
+    struct callable_priority_less {
         bool operator()(const callable &lhs, const callable &rhs) const noexcept {
             return lhs.compare(rhs) < 0;
         }

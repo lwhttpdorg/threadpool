@@ -36,10 +36,10 @@ namespace tp {
         enum class state { running, shutdown, stop };
 
         enum class reject_policy {
-            abort,         // ThreadPoolExecutor.AbortPolicy
-            caller_runs,   // ThreadPoolExecutor.CallerRunsPolicy
-            discard,       // ThreadPoolExecutor.DiscardPolicy
-            discard_oldest // ThreadPoolExecutor.DiscardOldestPolicy
+            abort,         // throw rejected_execution_exception
+            caller_runs,   // execute the task in the calling thread
+            discard,       // silently drop the task
+            discard_oldest // remove the oldest queued task and retry enqueue
         };
 
         thread_pool(unsigned int _core_pool_size, unsigned int _max_pool_size, std::chrono::seconds _keep_alive_time,
@@ -88,28 +88,18 @@ namespace tp {
         template<class F, class... Args,
                  typename = std::enable_if_t<!(std::is_integral_v<std::decay_t<F>> && sizeof...(Args) >= 1)>>
         void execute(F &&f, Args &&...args) {
-            if constexpr (sizeof...(Args) == 0) {
-                submit_task(callable(std::function<void()>(std::forward<F>(f))));
-            }
-            else {
-                auto fn = [f = std::forward<F>(f), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
-                    std::apply(std::move(f), std::move(tup));
-                };
-                submit_task(callable(std::function<void()>(std::move(fn))));
-            }
+            auto fn = [f = std::forward<F>(f), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
+                std::apply(std::move(f), std::move(tup));
+            };
+            submit_task(callable(std::move(fn)));
         }
 
         template<class F, class... Args>
         void execute(unsigned int priority, F &&f, Args &&...args) {
-            if constexpr (sizeof...(Args) == 0) {
-                submit_task(callable(std::function<void()>(std::forward<F>(f)), priority));
-            }
-            else {
-                auto fn = [f = std::forward<F>(f), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
-                    std::apply(std::move(f), std::move(tup));
-                };
-                submit_task(callable(std::function<void()>(std::move(fn)), priority));
-            }
+            auto fn = [f = std::forward<F>(f), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
+                std::apply(std::move(f), std::move(tup));
+            };
+            submit_task(callable(std::move(fn), priority));
         }
 
         void shutdown() {
@@ -126,10 +116,13 @@ namespace tp {
             // Drain remaining tasks BEFORE waking workers, so that poison pills
             // are not consumed by the drain loop.
             std::vector<callable> remaining;
-            callable task(callable::LOWEST_PRIORITY);
-            while (work_queue->try_pop(task)) {
-                if (!task.is_poison_pill()) {
-                    remaining.push_back(std::move(task));
+            {
+                std::lock_guard<std::mutex> lock(threads_mutex);
+                callable task(callable::LOWEST_PRIORITY);
+                while (work_queue->try_pop(task)) {
+                    if (!task.is_poison_pill()) {
+                        remaining.push_back(std::move(task));
+                    }
                 }
             }
 
@@ -242,18 +235,7 @@ namespace tp {
 
         void join_all_threads() {
             std::unique_lock<std::mutex> lock(threads_mutex);
-            std::vector<std::thread> to_join;
-            to_join.reserve(core_threads.size() + non_core_threads.size());
-            for (auto &t: core_threads) {
-                to_join.push_back(std::move(t));
-            }
-            core_threads.clear();
-            for (auto &t: non_core_threads) {
-                to_join.push_back(std::move(t));
-            }
-            non_core_threads.clear();
-            lock.unlock();
-
+            auto to_join = extract_and_unlock_threads(lock);
             for (auto &t: to_join) {
                 if (t.joinable()) {
                     t.join();
@@ -262,6 +244,17 @@ namespace tp {
         }
 
         void join_all_workers_locked(std::unique_lock<std::mutex> &lock) {
+            auto to_join = extract_and_unlock_threads(lock);
+            for (auto &t: to_join) {
+                if (t.joinable()) {
+                    t.join();
+                }
+            }
+            lock.lock();
+        }
+
+        // Helper to move threads out of the pool and unlock the mutex so joining doesn't block others.
+        std::vector<std::thread> extract_and_unlock_threads(std::unique_lock<std::mutex> &lock) {
             std::vector<std::thread> to_join;
             to_join.reserve(core_threads.size() + non_core_threads.size());
             for (auto &t: core_threads) {
@@ -273,13 +266,7 @@ namespace tp {
             }
             non_core_threads.clear();
             lock.unlock();
-
-            for (auto &t: to_join) {
-                if (t.joinable()) {
-                    t.join();
-                }
-            }
-            lock.lock();
+            return to_join;
         }
 
         // Core worker: blocks indefinitely on the queue, exits only on shutdown/stop.

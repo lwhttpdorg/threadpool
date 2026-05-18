@@ -76,6 +76,7 @@ template<typename T>
 class task_queue {
 public:
     virtual ~task_queue() = default;
+    virtual void push(T&&) = 0;
     virtual bool try_push(T&&) = 0;
     virtual T pop() = 0;
     virtual bool try_pop(T&) = 0;
@@ -99,6 +100,8 @@ public:
 
 - Backed by `std::vector<T>` with manual heap operations (`push_heap` / `pop_heap`)
 - Same locking and notification strategy as FIFO, but with heap ordering via `Compare`
+- Default `Compare` is `callable_priority_less`, which orders `callable` by priority (higher priority first)
+- For non-callable types, provide your own comparator (e.g. `std::less<T>`)
 
 ### 2.5. `reject_policy` — Rejection Policy Enum
 
@@ -291,6 +294,7 @@ All exceptions thrown by user code are caught and silently swallowed. This guara
 
 | Method | Description |
 |--------|-------------|
+| `push(T&&)` | Blocking enqueue, waits if queue is full |
 | `try_push(T&&)` | Non-blocking enqueue, returns `false` if full |
 | `pop()` | Blocking dequeue |
 | `try_pop(T&)` | Non-blocking dequeue, returns `false` if empty |
@@ -373,7 +377,7 @@ int main() {
 #include "threadpool/thread_pool.hpp"
 
 int main() {
-    auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable, tp::callable_priority_compare>>();
+    auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable>>();
     tp::thread_pool pool(4, 8, std::chrono::seconds(60), std::move(work_queue));
 
     // Higher priority value = earlier execution
