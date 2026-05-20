@@ -6,12 +6,12 @@
 #include <mutex>
 #include <vector>
 
-#include "threadpool/task_queue.hpp"
+#include "threadpool/blocking_queue.hpp"
 #include "threadpool/thread_pool.hpp"
 
 SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
     GIVEN("a single-threaded pool with a bounded priority task queue") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable>>(3);
+        auto work_queue = std::make_unique<tp::priority_task_queue>(3);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("tasks with different priorities are submitted out of order") {
@@ -76,7 +76,7 @@ SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
 
 SCENARIO("thread_pool execute overrides default priority", "[thread_pool]") {
     GIVEN("a single-threaded pool with a bounded priority task queue") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable>>(3);
+        auto work_queue = std::make_unique<tp::priority_task_queue>(3);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("a default-priority task and a high-priority task are submitted") {
@@ -132,7 +132,7 @@ SCENARIO("thread_pool execute overrides default priority", "[thread_pool]") {
 
 SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]") {
     GIVEN("a pool with core=1, max=2 and a bounded priority queue of capacity 1") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable>>(1);
+        auto work_queue = std::make_unique<tp::priority_task_queue>(1);
         tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("a high-priority task is submitted while queue is full") {
@@ -201,7 +201,7 @@ SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]
 
 SCENARIO("thread_pool rejects task when queue is full and max threads reached", "[thread_pool]") {
     GIVEN("a pool with core=1, max=1 and a bounded priority queue of capacity 1") {
-        auto work_queue = std::make_unique<tp::priority_task_queue<tp::callable>>(1);
+        auto work_queue = std::make_unique<tp::priority_task_queue>(1);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue),
                              tp::thread_pool::reject_policy::abort);
 
@@ -242,6 +242,115 @@ SCENARIO("thread_pool rejects task when queue is full and max threads reached", 
 
             pool.shutdown();
             pool.await_termination(std::chrono::seconds(5));
+        }
+    }
+}
+
+SCENARIO("thread_pool shutdown_now with priority queue returns remaining tasks", "[thread_pool]") {
+    GIVEN("a single-threaded pool with a bounded priority task queue") {
+        auto work_queue = std::make_unique<tp::priority_task_queue>(4);
+        tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
+
+        std::mutex blocker_mutex;
+        std::condition_variable blocker_cv;
+        bool blocker_started = false;
+        bool release_blocker = false;
+
+        // Block the sole worker
+        pool.execute([&]() {
+            {
+                std::scoped_lock lock(blocker_mutex);
+                blocker_started = true;
+            }
+            blocker_cv.notify_one();
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
+        });
+
+        {
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
+        }
+
+        // Queue up tasks
+        std::atomic<int> executed{0};
+        pool.execute(1, [&] { ++executed; });
+        pool.execute(5, [&] { ++executed; });
+        pool.execute(9, [&] { ++executed; });
+
+        WHEN("shutdown_now is called") {
+            auto remaining = pool.shutdown_now();
+
+            {
+                std::scoped_lock lock(blocker_mutex);
+                release_blocker = true;
+            }
+            blocker_cv.notify_one();
+
+            THEN("remaining tasks are returned and not executed") {
+                REQUIRE(remaining.size() == 3);
+                REQUIRE(pool.await_termination(std::chrono::seconds(5)));
+                REQUIRE(executed.load() == 0);
+            }
+        }
+    }
+}
+
+SCENARIO("thread_pool executes tasks with equal priority in FIFO order", "[thread_pool]") {
+    GIVEN("a single-threaded pool with a priority task queue") {
+        auto work_queue = std::make_unique<tp::priority_task_queue>(4);
+        tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
+
+        std::mutex blocker_mutex;
+        std::condition_variable blocker_cv;
+        bool blocker_started = false;
+        bool release_blocker = false;
+
+        // Block the worker so tasks queue up
+        pool.execute([&]() {
+            {
+                std::scoped_lock lock(blocker_mutex);
+                blocker_started = true;
+            }
+            blocker_cv.notify_one();
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
+        });
+
+        {
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
+        }
+
+        std::vector<int> execution_order;
+        std::mutex order_mutex;
+
+        WHEN("tasks with the same priority are submitted") {
+            pool.execute(5, [&] {
+                std::scoped_lock lock(order_mutex);
+                execution_order.push_back(1);
+            });
+            pool.execute(5, [&] {
+                std::scoped_lock lock(order_mutex);
+                execution_order.push_back(2);
+            });
+            pool.execute(5, [&] {
+                std::scoped_lock lock(order_mutex);
+                execution_order.push_back(3);
+            });
+
+            {
+                std::scoped_lock lock(blocker_mutex);
+                release_blocker = true;
+            }
+            blocker_cv.notify_one();
+
+            pool.shutdown();
+            REQUIRE(pool.await_termination(std::chrono::seconds(5)));
+
+            THEN("all tasks are executed") {
+                REQUIRE(execution_order.size() == 3);
+            }
         }
     }
 }

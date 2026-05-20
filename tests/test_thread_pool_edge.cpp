@@ -8,29 +8,29 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "threadpool/task_queue.hpp"
+#include "threadpool/blocking_queue.hpp"
 #include "threadpool/thread_pool.hpp"
 
 SCENARIO("thread_pool constructor rejects invalid pool sizes", "[thread_pool]") {
     GIVEN("core_pool_size > max_pool_size") {
         THEN("construction throws std::invalid_argument") {
-            auto wq = std::make_unique<tp::fifo_task_queue<tp::callable>>();
+            auto wq = std::make_unique<tp::fifo_task_queue>();
             REQUIRE_THROWS_AS(tp::thread_pool(4, 2, std::chrono::seconds(1), std::move(wq)), std::invalid_argument);
         }
     }
 }
 
-SCENARIO("thread_pool await_termination with negative timeout waits indefinitely", "[thread_pool]") {
+SCENARIO("thread_pool await_termination with zero timeout waits indefinitely", "[thread_pool]") {
     GIVEN("a running thread_pool") {
-        auto wq = std::make_unique<tp::fifo_task_queue<tp::callable>>();
+        auto wq = std::make_unique<tp::fifo_task_queue>();
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(wq));
 
-        WHEN("shutdown is called and await_termination uses negative timeout") {
+        WHEN("shutdown is called and await_termination uses zero timeout") {
             pool.execute([] {});
             pool.shutdown();
 
             THEN("await_termination blocks until all workers exit and returns true") {
-                bool ok = pool.await_termination(std::chrono::seconds(-1));
+                bool ok = pool.await_termination(std::chrono::seconds(0));
                 REQUIRE(ok);
             }
         }
@@ -39,7 +39,7 @@ SCENARIO("thread_pool await_termination with negative timeout waits indefinitely
 
 SCENARIO("thread_pool swallows exceptions thrown by user tasks", "[thread_pool]") {
     GIVEN("a running thread_pool") {
-        auto wq = std::make_unique<tp::fifo_task_queue<tp::callable>>();
+        auto wq = std::make_unique<tp::fifo_task_queue>();
         tp::thread_pool pool(2, 2, std::chrono::seconds(1), std::move(wq));
 
         WHEN("tasks throw exceptions") {
@@ -62,7 +62,7 @@ SCENARIO("thread_pool swallows exceptions thrown by user tasks", "[thread_pool]"
 
 SCENARIO("thread_pool discard_oldest falls through to reject when retry fails", "[thread_pool]") {
     GIVEN("a pool with discard_oldest policy, core=1, max=1, queue capacity=1") {
-        auto wq = std::make_unique<tp::fifo_task_queue<tp::callable>>(1);
+        auto wq = std::make_unique<tp::fifo_task_queue>(1);
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(wq),
                              tp::thread_pool::reject_policy::discard_oldest);
 
@@ -113,7 +113,7 @@ SCENARIO("thread_pool discard_oldest falls through to reject when retry fails", 
 
 SCENARIO("thread_pool non-core worker exits on shutdown_now (stop state)", "[thread_pool]") {
     GIVEN("a pool with core=1, max=2, queue capacity=1") {
-        auto wq = std::make_unique<tp::fifo_task_queue<tp::callable>>(1);
+        auto wq = std::make_unique<tp::fifo_task_queue>(1);
         tp::thread_pool pool(1, 2, std::chrono::seconds(60), std::move(wq));
 
         std::mutex blocker_mutex;
@@ -161,6 +161,172 @@ SCENARIO("thread_pool non-core worker exits on shutdown_now (stop state)", "[thr
             blocker_cv.notify_one();
 
             THEN("all workers exit and the pool terminates") {
+                REQUIRE(pool.await_termination(std::chrono::seconds(5)));
+                REQUIRE(non_core_ran.load());
+            }
+        }
+    }
+}
+
+SCENARIO("thread_pool non-core worker exits after keep-alive timeout", "[thread_pool]") {
+    GIVEN("a pool with core=1, max=2, keep_alive=1s, queue capacity=1") {
+        auto wq = std::make_unique<tp::fifo_task_queue>(1);
+        tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(wq));
+
+        std::mutex blocker_mutex;
+        std::condition_variable blocker_cv;
+        bool blocker_started = false;
+        bool release_blocker = false;
+
+        // Block the core worker
+        pool.execute([&]() {
+            {
+                std::scoped_lock lock(blocker_mutex);
+                blocker_started = true;
+            }
+            blocker_cv.notify_one();
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
+        });
+
+        {
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
+        }
+
+        // Fill the queue
+        pool.execute([] {});
+
+        // Trigger a non-core worker
+        std::atomic<bool> non_core_ran{false};
+        pool.execute([&] { non_core_ran = true; });
+
+        // Wait for non-core worker to finish its task
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        REQUIRE(non_core_ran.load());
+
+        WHEN("keep-alive timeout elapses with no new tasks") {
+            // Wait longer than keep_alive (1s)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+
+            THEN("the non-core worker has exited and the pool still functions") {
+                // Release core worker and submit a new task to prove pool is alive
+                {
+                    std::scoped_lock lock(blocker_mutex);
+                    release_blocker = true;
+                }
+                blocker_cv.notify_one();
+
+                std::atomic<bool> after_ran{false};
+                pool.execute([&] { after_ran = true; });
+
+                pool.shutdown();
+                REQUIRE(pool.await_termination(std::chrono::seconds(5)));
+                REQUIRE(after_ran.load());
+            }
+        }
+    }
+}
+
+SCENARIO("thread_pool non-core worker swallows exceptions from initial task", "[thread_pool]") {
+    GIVEN("a pool with core=1, max=2, queue capacity=1") {
+        auto wq = std::make_unique<tp::fifo_task_queue>(1);
+        tp::thread_pool pool(1, 2, std::chrono::seconds(1), std::move(wq));
+
+        std::mutex blocker_mutex;
+        std::condition_variable blocker_cv;
+        bool blocker_started = false;
+        bool release_blocker = false;
+
+        // Block the core worker
+        pool.execute([&]() {
+            {
+                std::scoped_lock lock(blocker_mutex);
+                blocker_started = true;
+            }
+            blocker_cv.notify_one();
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
+        });
+
+        {
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
+        }
+
+        // Fill the queue
+        pool.execute([] {});
+
+        WHEN("a non-core worker's initial task throws an exception") {
+            // This triggers a non-core worker whose initial task throws
+            pool.execute([] { throw std::runtime_error("non-core boom"); });
+
+            // Wait for non-core worker to execute and exit
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            THEN("the pool remains functional") {
+                {
+                    std::scoped_lock lock(blocker_mutex);
+                    release_blocker = true;
+                }
+                blocker_cv.notify_one();
+
+                std::atomic<bool> after_ran{false};
+                pool.execute([&] { after_ran = true; });
+
+                pool.shutdown();
+                REQUIRE(pool.await_termination(std::chrono::seconds(5)));
+                REQUIRE(after_ran.load());
+            }
+        }
+    }
+}
+
+SCENARIO("thread_pool non-core worker swallows exceptions from queued task", "[thread_pool]") {
+    GIVEN("a pool with core=1, max=2, keep_alive=2s, queue capacity=1") {
+        auto wq = std::make_unique<tp::fifo_task_queue>(1);
+        tp::thread_pool pool(1, 2, std::chrono::seconds(2), std::move(wq));
+
+        std::mutex blocker_mutex;
+        std::condition_variable blocker_cv;
+        bool blocker_started = false;
+        bool release_blocker = false;
+
+        // Block the core worker
+        pool.execute([&]() {
+            {
+                std::scoped_lock lock(blocker_mutex);
+                blocker_started = true;
+            }
+            blocker_cv.notify_one();
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
+        });
+
+        {
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
+        }
+
+        // Fill the queue with a task that throws
+        pool.execute([] { throw std::logic_error("queued boom"); });
+
+        // Trigger non-core worker with a normal initial task
+        std::atomic<bool> non_core_ran{false};
+        pool.execute([&] { non_core_ran = true; });
+
+        // Wait for non-core worker to run initial task and pick up the throwing queued task
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        WHEN("the non-core worker picks up a throwing task from the queue") {
+            THEN("the pool still terminates cleanly") {
+                {
+                    std::scoped_lock lock(blocker_mutex);
+                    release_blocker = true;
+                }
+                blocker_cv.notify_one();
+
+                pool.shutdown();
                 REQUIRE(pool.await_termination(std::chrono::seconds(5)));
                 REQUIRE(non_core_ran.load());
             }

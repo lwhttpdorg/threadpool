@@ -42,8 +42,8 @@ if(TP_ENABLE_CODECOVER)
 endif()
 
 set(TEST_SRCS
-    test_fifo_task_queue.cpp
-    test_priority_task_queue.cpp
+    test_blocking_queue.cpp
+    test_priority_blocking_queue.cpp
     test_thread_pool_basic.cpp
     test_thread_pool_shutdown.cpp
     test_thread_pool_reject.cpp
