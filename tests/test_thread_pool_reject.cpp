@@ -22,32 +22,32 @@ SCENARIO("thread_pool reject policy abort throws exception", "[thread_pool]") {
         bool blocker_started = false;
         bool release_blocker = false;
 
-        pool.execute([&]() {
+        pool.execute([&] {
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
             }
             blocker_cv.notify_one();
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return release_blocker; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
         });
 
         {
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return blocker_started; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
         }
 
         // Fill the queue with a task that takes non-zero time
-        pool.execute([&]() { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
+        pool.execute([&] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
 
         WHEN("a task is submitted while the queue is full") {
             THEN("submitting a task throws rejected_execution_exception") {
-                REQUIRE_THROWS_AS(pool.execute([]() {}), tp::thread_pool::rejected_execution_exception);
+                REQUIRE_THROWS_AS(pool.execute([] {}), tp::thread_pool::rejected_execution_exception);
             }
         }
 
         {
-            std::scoped_lock<std::mutex> lock(blocker_mutex);
+            std::scoped_lock lock(blocker_mutex);
             release_blocker = true;
         }
         blocker_cv.notify_one();
@@ -67,35 +67,35 @@ SCENARIO("thread_pool reject policy caller_runs executes in caller thread", "[th
         bool blocker_started = false;
         bool release_blocker = false;
 
-        pool.execute([&]() {
+        pool.execute([&] {
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
             }
             blocker_cv.notify_one();
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return release_blocker; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
         });
 
         {
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return blocker_started; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
         }
 
         // Fill the queue with a task that takes non-zero time
-        pool.execute([&]() { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
+        pool.execute([&] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
 
         WHEN("a task is submitted while the queue is full") {
             THEN("the task runs synchronously in the caller thread") {
                 auto caller_id = std::this_thread::get_id();
                 std::thread::id runner_id;
-                pool.execute([&]() { runner_id = std::this_thread::get_id(); });
+                pool.execute([&] { runner_id = std::this_thread::get_id(); });
                 REQUIRE(runner_id == caller_id);
             }
         }
 
         {
-            std::scoped_lock<std::mutex> lock(blocker_mutex);
+            std::scoped_lock lock(blocker_mutex);
             release_blocker = true;
         }
         blocker_cv.notify_one();
@@ -115,34 +115,34 @@ SCENARIO("thread_pool reject policy discard silently drops tasks", "[thread_pool
         bool blocker_started = false;
         bool release_blocker = false;
 
-        pool.execute([&]() {
+        pool.execute([&] {
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
             }
             blocker_cv.notify_one();
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return release_blocker; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
         });
 
         {
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return blocker_started; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
         }
 
         // Fill the queue with a task that takes non-zero time
-        pool.execute([&]() { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
+        pool.execute([&] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
 
         WHEN("a task is submitted while the queue is full") {
             THEN("the task is silently discarded") {
-                std::atomic<bool> ran{false};
-                pool.execute([&]() { ran = true; });
+                std::atomic ran{false};
+                pool.execute([&] { ran = true; });
                 REQUIRE_FALSE(ran);
             }
         }
 
         {
-            std::scoped_lock<std::mutex> lock(blocker_mutex);
+            std::scoped_lock lock(blocker_mutex);
             release_blocker = true;
         }
         blocker_cv.notify_one();
@@ -164,39 +164,39 @@ SCENARIO("thread_pool reject policy discard_oldest removes oldest queued task", 
         bool blocker_started = false;
         bool release_blocker = false;
 
-        pool.execute([&]() {
+        pool.execute([&] {
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
             }
             blocker_cv.notify_one();
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return release_blocker; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
         });
 
         {
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return blocker_started; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
         }
 
         // Fill the queue with two tasks
-        pool.execute([&]() {
-            std::scoped_lock<std::mutex> lock(order_mutex);
+        pool.execute([&] {
+            std::scoped_lock lock(order_mutex);
             execution_order.push_back(1);
         });
-        pool.execute([&]() {
-            std::scoped_lock<std::mutex> lock(order_mutex);
+        pool.execute([&] {
+            std::scoped_lock lock(order_mutex);
             execution_order.push_back(2);
         });
 
         // Submit a third task: oldest (task 1) should be discarded, task 3 enters the queue
-        pool.execute([&]() {
-            std::scoped_lock<std::mutex> lock(order_mutex);
+        pool.execute([&] {
+            std::scoped_lock lock(order_mutex);
             execution_order.push_back(3);
         });
 
         {
-            std::scoped_lock<std::mutex> lock(blocker_mutex);
+            std::scoped_lock lock(blocker_mutex);
             release_blocker = true;
         }
         blocker_cv.notify_one();

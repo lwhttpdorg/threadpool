@@ -89,7 +89,7 @@ namespace tp {
          * @brief Constructs a FIFO task queue.
          * @param _capacity Optional maximum capacity. If nullopt, the queue is unbounded.
          */
-        explicit array_blocking_queue(std::optional<size_t> _capacity = std::nullopt) : capacity(_capacity) {
+        explicit array_blocking_queue(const std::optional<size_t> _capacity = std::nullopt) : capacity(_capacity) {
             static_assert(std::is_nothrow_move_constructible_v<T>,
                           "array_blocking_queue error: Type T must be noexcept move constructible to prevent task loss "
                           "during pop().");
@@ -97,7 +97,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::push
         void push(T &&item) override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             cv_not_full.wait(lock, [this] { return !capacity.has_value() || task_q.size() < *capacity; });
             task_q.push_back(std::move(item));
             lock.unlock();
@@ -107,7 +107,7 @@ namespace tp {
         /// @copydoc blocking_queue::try_push
         bool try_push(T &&item) override {
             {
-                std::unique_lock<std::mutex> lock(q_mutex);
+                std::unique_lock lock(q_mutex);
                 if (capacity.has_value() && task_q.size() >= *capacity) {
                     return false;
                 }
@@ -119,7 +119,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::pop
         T pop() override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             cv_not_empty.wait(lock, [this] { return !task_q.empty(); });
             T item = std::move(task_q.front());
             task_q.pop_front();
@@ -130,7 +130,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::try_pop
         bool try_pop(T &item) override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             if (task_q.empty()) {
                 return false;
             }
@@ -143,7 +143,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::timed_pop
         bool timed_pop(T &item, std::chrono::milliseconds timeout) override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             bool has_item = cv_not_empty.wait_for(lock, timeout, [this] { return !task_q.empty(); });
             if (!has_item) {
                 return false;
@@ -157,13 +157,13 @@ namespace tp {
 
         /// @copydoc blocking_queue::size
         size_t size() const override {
-            std::lock_guard<std::mutex> lock(q_mutex);
+            std::lock_guard lock(q_mutex);
             return task_q.size();
         }
 
         /// @copydoc blocking_queue::empty
         bool empty() const override {
-            std::lock_guard<std::mutex> lock(q_mutex);
+            std::lock_guard lock(q_mutex);
             return task_q.empty();
         }
 
@@ -194,7 +194,7 @@ namespace tp {
          * @brief Constructs a priority task queue.
          * @param _capacity Optional maximum capacity. If nullopt, the queue is unbounded.
          */
-        explicit priority_blocking_queue(std::optional<size_t> _capacity = std::nullopt) : capacity(_capacity) {
+        explicit priority_blocking_queue(const std::optional<size_t> _capacity = std::nullopt) : capacity(_capacity) {
             static_assert(
                 std::is_nothrow_move_constructible_v<T>,
                 "priority_blocking_queue error: Type T must be noexcept move constructible to prevent task loss "
@@ -206,7 +206,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::push
         void push(T &&item) override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             cv_not_full.wait(lock, [this] { return !capacity.has_value() || task_q.size() < *capacity; });
             task_q.push_back(std::move(item));
             std::push_heap(task_q.begin(), task_q.end(), task_compare);
@@ -217,7 +217,7 @@ namespace tp {
         /// @copydoc blocking_queue::try_push
         bool try_push(T &&item) override {
             {
-                std::unique_lock<std::mutex> lock(q_mutex);
+                std::unique_lock lock(q_mutex);
                 if (capacity.has_value() && task_q.size() >= *capacity) {
                     return false;
                 }
@@ -230,7 +230,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::pop
         T pop() override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             cv_not_empty.wait(lock, [this] { return !task_q.empty(); });
             std::pop_heap(task_q.begin(), task_q.end(), task_compare);
             T item = std::move(task_q.back());
@@ -242,7 +242,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::try_pop
         bool try_pop(T &item) override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             if (task_q.empty()) {
                 return false;
             }
@@ -256,7 +256,7 @@ namespace tp {
 
         /// @copydoc blocking_queue::timed_pop
         bool timed_pop(T &item, std::chrono::milliseconds timeout) override {
-            std::unique_lock<std::mutex> lock(q_mutex);
+            std::unique_lock lock(q_mutex);
             bool has_item = cv_not_empty.wait_for(lock, timeout, [this] { return !task_q.empty(); });
             if (!has_item) {
                 return false;
@@ -271,13 +271,13 @@ namespace tp {
 
         /// @copydoc blocking_queue::size
         size_t size() const override {
-            std::lock_guard<std::mutex> lock(q_mutex);
+            std::lock_guard lock(q_mutex);
             return task_q.size();
         }
 
         /// @copydoc blocking_queue::empty
         bool empty() const override {
-            std::lock_guard<std::mutex> lock(q_mutex);
+            std::lock_guard lock(q_mutex);
             return task_q.empty();
         }
 

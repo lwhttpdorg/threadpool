@@ -118,7 +118,7 @@ SCENARIO("priority_blocking_queue push blocks until space is available", "[prior
         task_q.try_push(2);
 
         WHEN("push is called on a full queue from another thread") {
-            std::atomic<bool> push_completed{false};
+            std::atomic push_completed{false};
             std::jthread producer([&] {
                 task_q.push(std::move(3));
                 push_completed = true;
@@ -129,7 +129,7 @@ SCENARIO("priority_blocking_queue push blocks until space is available", "[prior
             REQUIRE_FALSE(push_completed.load());
 
             THEN("push completes after an item is popped") {
-                auto val = task_q.pop();
+                const auto val = task_q.pop();
                 REQUIRE(val == 2); // max-heap: highest first
 
                 producer.join();
@@ -209,7 +209,7 @@ SCENARIO("priority_blocking_queue wake_all unblocks waiting threads", "[priority
         tp::priority_blocking_queue<int, std::less<>> task_q;
 
         WHEN("a thread is blocked on timed_pop and wake_all is called") {
-            std::atomic<bool> pop_returned{false};
+            std::atomic pop_returned{false};
             std::jthread consumer([&] {
                 int item = 0;
                 task_q.timed_pop(item, std::chrono::seconds(10));
@@ -233,7 +233,7 @@ SCENARIO("priority_blocking_queue wake_all unblocks waiting threads", "[priority
         tp::priority_blocking_queue<int, std::greater<>> task_q;
 
         WHEN("a thread is blocked on timed_pop and wake_all is called") {
-            std::atomic<bool> pop_returned{false};
+            std::atomic pop_returned{false};
             std::jthread consumer([&] {
                 int item = 0;
                 task_q.timed_pop(item, std::chrono::seconds(10));

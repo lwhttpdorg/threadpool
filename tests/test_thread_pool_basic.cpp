@@ -16,9 +16,9 @@ SCENARIO("thread_pool executes submitted tasks", "[thread_pool]") {
         tp::thread_pool pool(2, 4, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("several tasks are submitted") {
-            std::atomic<int> counter{0};
+            std::atomic counter{0};
             for (int i = 0; i < 5; ++i) {
-                pool.execute([&]() { ++counter; });
+                pool.execute([&] { ++counter; });
             }
 
             THEN("all tasks are executed after shutdown") {
@@ -36,15 +36,15 @@ SCENARIO("thread_pool keeps core threads alive", "[thread_pool]") {
         tp::thread_pool pool(2, 4, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("tasks are executed and complete") {
-            std::atomic<int> counter{0};
-            pool.execute([&]() { ++counter; });
-            pool.execute([&]() { ++counter; });
+            std::atomic counter{0};
+            pool.execute([&] { ++counter; });
+            pool.execute([&] { ++counter; });
 
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
             THEN("subsequent tasks are picked up promptly") {
-                std::atomic<bool> third_ran{false};
-                pool.execute([&]() { third_ran = true; });
+                std::atomic third_ran{false};
+                pool.execute([&] { third_ran = true; });
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 REQUIRE(third_ran);
             }
@@ -66,33 +66,33 @@ SCENARIO("thread_pool queue_size reflects pending tasks", "[thread_pool]") {
         tp::thread_pool pool(1, 1, std::chrono::seconds(1), std::move(work_queue));
 
         WHEN("multiple slow tasks are submitted") {
-            std::atomic<int> started{0};
+            std::atomic started{0};
             std::mutex blocker_mutex;
             std::condition_variable blocker_cv;
             bool blocker_started = false;
             bool release_blocker = false;
 
             // Block the sole worker thread deterministically
-            pool.execute([&]() {
+            pool.execute([&] {
                 ++started;
                 {
-                    std::scoped_lock<std::mutex> lock(blocker_mutex);
+                    std::scoped_lock lock(blocker_mutex);
                     blocker_started = true;
                 }
                 blocker_cv.notify_one();
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return release_blocker; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return release_blocker; });
             });
 
             // Wait until the blocker task has actually started
             {
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return blocker_started; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return blocker_started; });
             }
 
             // Submit more tasks that will queue up
             for (int i = 0; i < 4; ++i) {
-                pool.execute([&]() { ++started; });
+                pool.execute([&] { ++started; });
             }
 
             THEN("not all tasks have started yet") {
@@ -100,7 +100,7 @@ SCENARIO("thread_pool queue_size reflects pending tasks", "[thread_pool]") {
             }
 
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 release_blocker = true;
             }
             blocker_cv.notify_one();
@@ -113,15 +113,15 @@ SCENARIO("thread_pool queue_size reflects pending tasks", "[thread_pool]") {
 
 // --- Free functions for submit tests ---
 
-static std::atomic<bool> func_no_arg_called{false};
+static std::atomic func_no_arg_called{false};
 
 void func_no_arg() {
     func_no_arg_called = true;
 }
 
-static std::atomic<int> func_with_args_result{0};
+static std::atomic func_with_args_result{0};
 
-void func_with_args(int x, int y) {
+void func_with_args(const int x, const int y) {
     func_with_args_result = x + y;
 }
 

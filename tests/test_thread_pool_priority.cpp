@@ -1,10 +1,11 @@
 #include <atomic>
-#include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <vector>
+
+#include <catch2/catch_test_macros.hpp>
 
 #include "threadpool/blocking_queue.hpp"
 #include "threadpool/thread_pool.hpp"
@@ -23,40 +24,40 @@ SCENARIO("thread_pool executes queued tasks by priority", "[thread_pool]") {
             bool release_blocker = false;
 
             // Submit a blocker task to occupy the sole worker thread
-            pool.execute([&]() {
+            pool.execute([&] {
                 {
-                    std::scoped_lock<std::mutex> lock(blocker_mutex);
+                    std::scoped_lock lock(blocker_mutex);
                     blocker_started = true;
                 }
                 blocker_cv.notify_one();
 
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return release_blocker; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return release_blocker; });
             });
 
             // Wait until the blocker task has actually started
             {
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return blocker_started; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return blocker_started; });
             }
 
             // At this point the worker thread is blocked, so all new tasks go into the queue
-            pool.execute(1, [&]() {
-                std::scoped_lock<std::mutex> lock(order_mutex);
+            pool.execute(1, [&] {
+                std::scoped_lock lock(order_mutex);
                 execution_order.push_back(1);
             });
-            pool.execute(3, [&]() {
-                std::scoped_lock<std::mutex> lock(order_mutex);
+            pool.execute(3, [&] {
+                std::scoped_lock lock(order_mutex);
                 execution_order.push_back(3);
             });
-            pool.execute(2, [&]() {
-                std::scoped_lock<std::mutex> lock(order_mutex);
+            pool.execute(2, [&] {
+                std::scoped_lock lock(order_mutex);
                 execution_order.push_back(2);
             });
 
             // Release the blocker so the worker starts consuming the queue by priority
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 release_blocker = true;
             }
             blocker_cv.notify_one();
@@ -87,33 +88,33 @@ SCENARIO("thread_pool execute overrides default priority", "[thread_pool]") {
             bool blocker_started = false;
             bool release_blocker = false;
 
-            pool.execute([&]() {
+            pool.execute([&] {
                 {
-                    std::scoped_lock<std::mutex> lock(blocker_mutex);
+                    std::scoped_lock lock(blocker_mutex);
                     blocker_started = true;
                 }
                 blocker_cv.notify_one();
 
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return release_blocker; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return release_blocker; });
             });
 
             {
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return blocker_started; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return blocker_started; });
             }
 
-            pool.execute([&]() {
-                std::scoped_lock<std::mutex> lock(order_mutex);
+            pool.execute([&] {
+                std::scoped_lock lock(order_mutex);
                 execution_order.push_back(0);
             });
-            pool.execute(5, [&]() {
-                std::scoped_lock<std::mutex> lock(order_mutex);
+            pool.execute(5, [&] {
+                std::scoped_lock lock(order_mutex);
                 execution_order.push_back(5);
             });
 
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 release_blocker = true;
             }
             blocker_cv.notify_one();
@@ -142,35 +143,35 @@ SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]
             std::condition_variable blocker_cv;
             bool blocker_started = false;
             bool release_blocker = false;
-            std::atomic<bool> high_priority_started{false};
+            std::atomic high_priority_started{false};
 
             // Blocker occupies the core worker thread
-            pool.execute([&]() {
+            pool.execute([&] {
                 {
-                    std::scoped_lock<std::mutex> lock(blocker_mutex);
+                    std::scoped_lock lock(blocker_mutex);
                     blocker_started = true;
                 }
                 blocker_cv.notify_one();
 
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return release_blocker; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return release_blocker; });
             });
 
             {
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return blocker_started; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return blocker_started; });
             }
 
             // Enqueue a low-priority task (queue becomes full)
-            pool.execute(1, [&]() {
-                std::scoped_lock<std::mutex> lock(order_mutex);
+            pool.execute(1, [&] {
+                std::scoped_lock lock(order_mutex);
                 execution_order.push_back(1);
             });
 
             // Queue is full, a non-core worker will be spawned to run the high-priority task directly
-            pool.execute(3, [&]() {
+            pool.execute(3, [&] {
                 {
-                    std::scoped_lock<std::mutex> lock(order_mutex);
+                    std::scoped_lock lock(order_mutex);
                     execution_order.push_back(3);
                 }
                 high_priority_started.store(true);
@@ -182,7 +183,7 @@ SCENARIO("thread_pool spawns non-core worker when queue is full", "[thread_pool]
             }
 
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 release_blocker = true;
             }
             blocker_cv.notify_one();
@@ -211,31 +212,31 @@ SCENARIO("thread_pool rejects task when queue is full and max threads reached", 
             bool blocker_started = false;
             bool release_blocker = false;
 
-            pool.execute([&]() {
+            pool.execute([&] {
                 {
-                    std::scoped_lock<std::mutex> lock(blocker_mutex);
+                    std::scoped_lock lock(blocker_mutex);
                     blocker_started = true;
                 }
                 blocker_cv.notify_one();
 
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return release_blocker; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return release_blocker; });
             });
 
             {
-                std::unique_lock<std::mutex> lock(blocker_mutex);
-                blocker_cv.wait(lock, [&]() { return blocker_started; });
+                std::unique_lock lock(blocker_mutex);
+                blocker_cv.wait(lock, [&] { return blocker_started; });
             }
 
             // Enqueue a task (queue becomes full)
-            pool.execute(1, [&]() {});
+            pool.execute(1, [&] {});
 
             THEN("the next task is rejected with an exception") {
-                REQUIRE_THROWS_AS(pool.execute(3, [&]() {}), tp::thread_pool::rejected_execution_exception);
+                REQUIRE_THROWS_AS(pool.execute(3, [&] {}), tp::thread_pool::rejected_execution_exception);
             }
 
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 release_blocker = true;
             }
             blocker_cv.notify_one();
@@ -257,7 +258,7 @@ SCENARIO("thread_pool shutdown_now with priority queue returns remaining tasks",
         bool release_blocker = false;
 
         // Block the sole worker
-        pool.execute([&]() {
+        pool.execute([&] {
             {
                 std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
@@ -273,13 +274,13 @@ SCENARIO("thread_pool shutdown_now with priority queue returns remaining tasks",
         }
 
         // Queue up tasks
-        std::atomic<int> executed{0};
+        std::atomic executed{0};
         pool.execute(1, [&] { ++executed; });
         pool.execute(5, [&] { ++executed; });
         pool.execute(9, [&] { ++executed; });
 
         WHEN("shutdown_now is called") {
-            auto remaining = pool.shutdown_now();
+            const auto remaining = pool.shutdown_now();
 
             {
                 std::scoped_lock lock(blocker_mutex);
@@ -307,7 +308,7 @@ SCENARIO("thread_pool executes tasks with equal priority in FIFO order", "[threa
         bool release_blocker = false;
 
         // Block the worker so tasks queue up
-        pool.execute([&]() {
+        pool.execute([&] {
             {
                 std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
@@ -322,10 +323,9 @@ SCENARIO("thread_pool executes tasks with equal priority in FIFO order", "[threa
             blocker_cv.wait(lock, [&] { return blocker_started; });
         }
 
-        std::vector<int> execution_order;
-        std::mutex order_mutex;
-
         WHEN("tasks with the same priority are submitted") {
+            std::mutex order_mutex;
+            std::vector<int> execution_order;
             pool.execute(5, [&] {
                 std::scoped_lock lock(order_mutex);
                 execution_order.push_back(1);

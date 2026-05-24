@@ -118,18 +118,18 @@ SCENARIO("array_blocking_queue supports batch push", "[array_blocking_queue]") {
 SCENARIO("array_blocking_queue handles concurrent push and pop", "[array_blocking_queue]") {
     GIVEN("an empty array_blocking_queue and a producer-consumer pair") {
         tp::array_blocking_queue<int> task_q;
-        const int count = 1000;
 
         WHEN("producer pushes 1000 items while consumer pops them") {
-            std::jthread producer([&]() {
+            constexpr int count = 1000;
+            std::jthread producer([&] {
                 for (int i = 0; i < count; ++i) {
                     task_q.try_push(std::move(i));
                 }
             });
 
-            std::jthread consumer([&]() {
+            std::jthread consumer([&] {
                 for (int i = 0; i < count; ++i) {
-                    auto val = task_q.pop();
+                    const auto val = task_q.pop();
                     (void)val;
                 }
             });
@@ -153,7 +153,7 @@ SCENARIO("array_blocking_queue push blocks until space is available", "[array_bl
         task_q.try_push(2);
 
         WHEN("push is called on a full queue from another thread") {
-            std::atomic<bool> push_completed{false};
+            std::atomic push_completed{false};
             std::jthread producer([&] {
                 task_q.push(std::move(3));
                 push_completed = true;
@@ -209,7 +209,7 @@ SCENARIO("array_blocking_queue wake_all unblocks waiting threads", "[array_block
         tp::array_blocking_queue<int> task_q;
 
         WHEN("a thread is blocked on timed_pop and wake_all is called") {
-            std::atomic<bool> pop_returned{false};
+            std::atomic pop_returned{false};
             std::jthread consumer([&] {
                 int item = 0;
                 task_q.timed_pop(item, std::chrono::seconds(10));

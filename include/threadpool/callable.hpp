@@ -23,18 +23,18 @@ namespace tp {
 
         /// @brief Constructs an empty callable with the given priority.
         /// @param _priority The priority value.
-        explicit callable(unsigned int _priority) noexcept : func(nullptr), priority(_priority) {
+        explicit callable(const unsigned int _priority) noexcept : func(nullptr), priority(_priority) {
         }
 
         /// @brief Constructs a callable with the given function and default priority.
         /// @param _func The function to wrap.
-        explicit callable(std::function<void(void)> _func) : func(std::move(_func)), priority(DEFAULT_PRIORITY) {
+        explicit callable(std::function<void()> _func) : func(std::move(_func)), priority(DEFAULT_PRIORITY) {
         }
 
         /// @brief Constructs a callable with the given function and priority.
         /// @param _func The function to wrap.
         /// @param _priority The priority value.
-        callable(std::function<void(void)> _func, unsigned int _priority) :
+        callable(std::function<void()> _func, const unsigned int _priority) :
             func(std::move(_func)), priority(_priority) {
         }
 
@@ -66,8 +66,8 @@ namespace tp {
         }
 
     protected:
-        std::function<void(void)> func; ///< The wrapped function.
-        unsigned int priority = 0;      ///< The scheduling priority.
+        std::function<void()> func; ///< The wrapped function.
+        unsigned int priority = 0;  ///< The scheduling priority.
     };
 
     /**

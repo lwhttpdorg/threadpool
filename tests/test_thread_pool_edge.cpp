@@ -43,11 +43,11 @@ SCENARIO("thread_pool swallows exceptions thrown by user tasks", "[thread_pool]"
         tp::thread_pool pool(2, 2, std::chrono::seconds(1), std::move(wq));
 
         WHEN("tasks throw exceptions") {
-            std::atomic<int> counter{0};
+            std::atomic counter{0};
 
             pool.execute([] { throw std::runtime_error("boom"); });
             pool.execute([&] { ++counter; });
-            pool.execute([] { throw 42; });
+            pool.execute([] { throw std::runtime_error("Task failed with error code 42"); });
             pool.execute([&] { ++counter; });
 
             pool.shutdown();
@@ -72,31 +72,31 @@ SCENARIO("thread_pool discard_oldest falls through to reject when retry fails", 
         bool release_blocker = false;
 
         // Block the sole worker
-        pool.execute([&]() {
+        pool.execute([&] {
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
             }
             blocker_cv.notify_one();
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return release_blocker; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
         });
 
         {
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return blocker_started; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
         }
 
         // Fill the queue
-        pool.execute([&]() {});
+        pool.execute([&] {});
 
         WHEN("another task is submitted triggering discard_oldest") {
-            std::atomic<bool> ran{false};
+            std::atomic ran{false};
             // discard_oldest pops the oldest, retries push — should succeed
-            pool.execute([&]() { ran = true; });
+            pool.execute([&] { ran = true; });
 
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 release_blocker = true;
             }
             blocker_cv.notify_one();
@@ -122,27 +122,27 @@ SCENARIO("thread_pool non-core worker exits on shutdown_now (stop state)", "[thr
         bool release_blocker = false;
 
         // Block the core worker
-        pool.execute([&]() {
+        pool.execute([&] {
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
             }
             blocker_cv.notify_one();
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return release_blocker; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return release_blocker; });
         });
 
         {
-            std::unique_lock<std::mutex> lock(blocker_mutex);
-            blocker_cv.wait(lock, [&]() { return blocker_started; });
+            std::unique_lock lock(blocker_mutex);
+            blocker_cv.wait(lock, [&] { return blocker_started; });
         }
 
         // Fill the queue
         pool.execute([] {});
 
         // This triggers a non-core worker
-        std::atomic<bool> non_core_ran{false};
-        pool.execute([&]() {
+        std::atomic non_core_ran{false};
+        pool.execute([&] {
             non_core_ran = true;
             // Sleep so the non-core worker is still alive when shutdown_now is called
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -155,7 +155,7 @@ SCENARIO("thread_pool non-core worker exits on shutdown_now (stop state)", "[thr
             auto remaining = pool.shutdown_now();
 
             {
-                std::scoped_lock<std::mutex> lock(blocker_mutex);
+                std::scoped_lock lock(blocker_mutex);
                 release_blocker = true;
             }
             blocker_cv.notify_one();
@@ -179,7 +179,7 @@ SCENARIO("thread_pool non-core worker exits after keep-alive timeout", "[thread_
         bool release_blocker = false;
 
         // Block the core worker
-        pool.execute([&]() {
+        pool.execute([&] {
             {
                 std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
@@ -198,7 +198,7 @@ SCENARIO("thread_pool non-core worker exits after keep-alive timeout", "[thread_
         pool.execute([] {});
 
         // Trigger a non-core worker
-        std::atomic<bool> non_core_ran{false};
+        std::atomic non_core_ran{false};
         pool.execute([&] { non_core_ran = true; });
 
         // Wait for non-core worker to finish its task
@@ -217,7 +217,7 @@ SCENARIO("thread_pool non-core worker exits after keep-alive timeout", "[thread_
                 }
                 blocker_cv.notify_one();
 
-                std::atomic<bool> after_ran{false};
+                std::atomic after_ran{false};
                 pool.execute([&] { after_ran = true; });
 
                 pool.shutdown();
@@ -239,7 +239,7 @@ SCENARIO("thread_pool non-core worker swallows exceptions from initial task", "[
         bool release_blocker = false;
 
         // Block the core worker
-        pool.execute([&]() {
+        pool.execute([&] {
             {
                 std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
@@ -271,7 +271,7 @@ SCENARIO("thread_pool non-core worker swallows exceptions from initial task", "[
                 }
                 blocker_cv.notify_one();
 
-                std::atomic<bool> after_ran{false};
+                std::atomic after_ran{false};
                 pool.execute([&] { after_ran = true; });
 
                 pool.shutdown();
@@ -293,7 +293,7 @@ SCENARIO("thread_pool non-core worker swallows exceptions from queued task", "[t
         bool release_blocker = false;
 
         // Block the core worker
-        pool.execute([&]() {
+        pool.execute([&] {
             {
                 std::scoped_lock lock(blocker_mutex);
                 blocker_started = true;
@@ -312,7 +312,7 @@ SCENARIO("thread_pool non-core worker swallows exceptions from queued task", "[t
         pool.execute([] { throw std::logic_error("queued boom"); });
 
         // Trigger non-core worker with a normal initial task
-        std::atomic<bool> non_core_ran{false};
+        std::atomic non_core_ran{false};
         pool.execute([&] { non_core_ran = true; });
 
         // Wait for non-core worker to run initial task and pick up the throwing queued task

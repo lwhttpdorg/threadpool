@@ -22,7 +22,7 @@ namespace tp {
     constexpr const char *THREAD_POOL_FULL = "queue is full and max threads reached";
 
     using fifo_task_queue = array_blocking_queue<callable>;
-    using priority_task_queue = priority_blocking_queue<callable, callable_priority_less>;
+    using priority_task_queue = priority_blocking_queue<callable>;
 
     /**
      * @class thread_pool
@@ -52,7 +52,7 @@ namespace tp {
          * @enum pool_fsm_state
          * @brief The finite state machine states of the thread pool.
          */
-        enum class pool_fsm_state {
+        enum class pool_fsm_state : uint8_t {
             running,  ///< Accepting and executing tasks.
             shutdown, ///< No new tasks accepted; queued tasks will be drained.
             stop      ///< No new tasks accepted; in-progress tasks finish but queued tasks are discarded.
@@ -62,7 +62,7 @@ namespace tp {
          * @enum reject_policy
          * @brief Policy applied when a task cannot be enqueued and no new worker can be created.
          */
-        enum class reject_policy {
+        enum class reject_policy : uint8_t {
             abort,         ///< Throw rejected_execution_exception.
             caller_runs,   ///< Execute the task in the calling thread.
             discard,       ///< Silently drop the task.
@@ -78,29 +78,29 @@ namespace tp {
          * @param _rej_policy Rejection policy when the pool is saturated.
          * @throws std::invalid_argument if core_pool_size > max_pool_size.
          */
-        thread_pool(unsigned int _core_pool_size, unsigned int _max_pool_size, std::chrono::seconds _keep_alive_time,
-                    std::unique_ptr<blocking_queue<callable>> _work_queue,
-                    reject_policy _rej_policy = reject_policy::abort) :
+        thread_pool(const unsigned int _core_pool_size, const unsigned int _max_pool_size,
+                    const std::chrono::seconds _keep_alive_time, std::unique_ptr<blocking_queue<callable>> _work_queue,
+                    const reject_policy _rej_policy = reject_policy::abort) :
             core_pool_size(_core_pool_size), max_pool_size(_max_pool_size), keep_alive_time(_keep_alive_time),
             work_queue(std::move(_work_queue)), rej_policy(_rej_policy) {
             if (_core_pool_size > _max_pool_size) {
                 throw std::invalid_argument("core pool size must be less than or equal to max pool size");
             }
-            watcher_thread = std::jthread([this]() { watcher_thread_loop(); });
+            watcher_thread = std::jthread([this] { watcher_thread_loop(); });
             start_core_threads();
         }
 
         /// @overload
-        thread_pool(unsigned int _core_pool_size, unsigned int _max_pool_size, std::chrono::minutes _keep_alive_time,
-                    std::unique_ptr<blocking_queue<callable>> _work_queue,
-                    reject_policy _rej_policy = reject_policy::abort) :
+        thread_pool(const unsigned int _core_pool_size, const unsigned int _max_pool_size,
+                    const std::chrono::minutes _keep_alive_time, std::unique_ptr<blocking_queue<callable>> _work_queue,
+                    const reject_policy _rej_policy = reject_policy::abort) :
             core_pool_size(_core_pool_size), max_pool_size(_max_pool_size),
             keep_alive_time(std::chrono::duration_cast<std::chrono::seconds>(_keep_alive_time)),
             work_queue(std::move(_work_queue)), rej_policy(_rej_policy) {
             if (_core_pool_size > _max_pool_size) {
                 throw std::invalid_argument("core pool size must be less than or equal to max pool size");
             }
-            watcher_thread = std::jthread([this]() { watcher_thread_loop(); });
+            watcher_thread = std::jthread([this] { watcher_thread_loop(); });
             start_core_threads();
         }
 
@@ -136,9 +136,10 @@ namespace tp {
          * @param f The function to execute.
          * @param args Arguments to forward to f.
          */
-        template<class F, class... Args,
-                 typename = std::enable_if_t<!(std::is_integral_v<std::decay_t<F>> && sizeof...(Args) >= 1)>>
-        void execute(F &&f, Args &&...args) {
+        template<class F, class... Args>
+        void execute(F &&f, Args &&...args)
+            requires(!(std::is_integral_v<std::decay_t<F>> && sizeof...(Args) >= 1))
+        {
             auto fn = [f = std::forward<F>(f), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
                 std::apply(std::move(f), std::move(tup));
             };
@@ -154,7 +155,7 @@ namespace tp {
          * @param args Arguments to forward to f.
          */
         template<class F, class... Args>
-        void execute(unsigned int priority, F &&f, Args &&...args) {
+        void execute(const unsigned int priority, F &&f, Args &&...args) {
             auto fn = [f = std::forward<F>(f), tup = std::make_tuple(std::forward<Args>(args)...)]() mutable {
                 std::apply(std::move(f), std::move(tup));
             };
@@ -207,11 +208,11 @@ namespace tp {
          * @param timeout Maximum duration to wait. Zero means wait forever.
          * @return true if all workers terminated within the timeout, false otherwise.
          */
-        bool await_termination(std::chrono::seconds timeout) {
+        bool await_termination(const std::chrono::seconds timeout) {
             bool terminated = false;
 
             {
-                std::unique_lock<std::mutex> lock(non_core_thread_mutex);
+                std::unique_lock lock(non_core_thread_mutex);
                 // Wait for all non-core threads to exit
                 auto all_non_core_thread_stopped = [this] { return non_core_threads.empty(); };
 
@@ -243,7 +244,7 @@ namespace tp {
             while (true) {
                 std::vector<std::thread::id> local_zombie_tids;
                 {
-                    std::unique_lock<std::mutex> join_lock(join_mutex);
+                    std::unique_lock join_lock(join_mutex);
                     join_cv.wait(join_lock, [this] {
                         return !zombie_non_core_threads.empty() || pool_fsm_state::running != pool_state.load();
                     });
@@ -251,7 +252,7 @@ namespace tp {
                 }
 
                 {
-                    std::unique_lock<std::mutex> map_lock(non_core_thread_mutex);
+                    std::unique_lock map_lock(non_core_thread_mutex);
                     for (auto &tid: local_zombie_tids) {
                         auto it = non_core_threads.find(tid);
                         if (it != non_core_threads.end()) {
@@ -272,7 +273,7 @@ namespace tp {
         void start_core_threads() {
             core_threads.reserve(core_pool_size);
             for (unsigned int i = 0; i < core_pool_size; ++i) {
-                core_threads.emplace_back([this]() { core_worker_loop(); });
+                core_threads.emplace_back([this] { core_worker_loop(); });
             }
         }
 
@@ -288,7 +289,7 @@ namespace tp {
             }
             std::jthread work_thread(
                 [this, task = std::move(initial_task)]() mutable { non_core_worker_loop(std::move(task)); });
-            std::thread::id tid = work_thread.get_id();
+            const std::thread::id tid = work_thread.get_id();
             non_core_threads[tid] = std::move(work_thread);
             return true;
         }
@@ -351,7 +352,7 @@ namespace tp {
                 core_threads.pop_back();
             }
             {
-                std::unique_lock<std::mutex> lock(non_core_thread_mutex);
+                std::unique_lock lock(non_core_thread_mutex);
                 auto it = non_core_threads.begin();
                 while (it != non_core_threads.end()) {
                     if (it->second.joinable()) {
@@ -373,7 +374,7 @@ namespace tp {
          * Exits when shutdown_now (stop) is called unconditionally, or when
          * shutdown is called and the queue is empty.
          */
-        void core_worker_loop() {
+        void core_worker_loop() const {
             while (true) {
                 pool_fsm_state st = pool_state.load();
                 // shutdown_now: exit unconditionally
@@ -396,6 +397,7 @@ namespace tp {
                 try {
                     task();
                 }
+                // NOLINTNEXTLINE
                 catch (...) {
                     // Swallow user exceptions to prevent std::terminate.
                 }
@@ -411,11 +413,12 @@ namespace tp {
          *
          * @param initial_task The first task to execute (passed from submit_task).
          */
-        void non_core_worker_loop(callable initial_task) {
+        void non_core_worker_loop(const callable &initial_task) {
             // Execute the initial task first
             try {
                 initial_task();
             }
+            // NOLINTNEXTLINE
             catch (...) {
                 // Swallow user exceptions to prevent std::terminate.
             }
@@ -435,13 +438,14 @@ namespace tp {
                 try {
                     task();
                 }
+                // NOLINTNEXTLINE
                 catch (...) {
                     // Swallow user exceptions to prevent std::terminate.
                 }
             }
             // Notify watcher thread to reclaim this non-core thread before exiting
-            std::thread::id tid = std::this_thread::get_id();
             {
+                const std::thread::id tid = std::this_thread::get_id();
                 std::scoped_lock join_lock(join_mutex);
                 zombie_non_core_threads.push_back(tid);
             }
