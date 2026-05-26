@@ -376,15 +376,14 @@ namespace tp {
          */
         void core_worker_loop() const {
             while (true) {
-                pool_fsm_state st = pool_state.load();
                 // shutdown_now: exit unconditionally
-                if (st == pool_fsm_state::stop) {
+                if (pool_fsm_state::stop == pool_state.load()) {
                     break;
                 }
                 callable task{};
                 if (!work_queue->timed_pop(task, std::chrono::milliseconds(1000))) {
                     // Already in shutdown state and queue is empty, core thread exits
-                    if (pool_fsm_state::shutdown == st && work_queue->empty()) {
+                    if (pool_fsm_state::shutdown == pool_state.load() && work_queue->empty()) {
                         break;
                     }
                     continue;

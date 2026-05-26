@@ -65,7 +65,7 @@ namespace tp {
             return 0;
         }
 
-    protected:
+    private:
         std::function<void()> func; ///< The wrapped function.
         unsigned int priority = 0;  ///< The scheduling priority.
     };
