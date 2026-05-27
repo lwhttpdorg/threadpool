@@ -1,33 +1,33 @@
 # thread_pool Design Document
 
 <!-- TOC -->
-- [1. Overview](#1.-overview)
-- [2. Core Classes](#2.-core-classes)
-  - [2.1. `callable` — Task Wrapper](#2.1.-%60callable%60-%E2%80%94-task-wrapper)
-  - [2.2. `blocking_queue<T>` — Queue Interface](#2.2.-%60blocking_queue%3Ct%3E%60-%E2%80%94-queue-interface)
-  - [2.3. `array_blocking_queue<T>` — FIFO Implementation](#2.3.-%60array_blocking_queue%3Ct%3E%60-%E2%80%94-fifo-implementation)
-  - [2.4. `priority_blocking_queue<T, Compare>` — Priority Implementation](#2.4.-%60priority_blocking_queue%3Ct%2C-compare%3E%60-%E2%80%94-priority-implementation)
-  - [2.5. `reject_policy` — Rejection Policy Enum](#2.5.-%60reject_policy%60-%E2%80%94-rejection-policy-enum)
-  - [2.6. `pool_fsm_state` — Lifecycle State Enum](#2.6.-%60pool_fsm_state%60-%E2%80%94-lifecycle-state-enum)
-  - [2.7. `thread_pool` — Thread Pool](#2.7.-%60thread_pool%60-%E2%80%94-thread-pool)
-- [3. Class Diagram](#3.-class-diagram)
-- [4. Task Queue Design](#4.-task-queue-design)
-- [5. Thread Pool Lifecycle](#5.-thread-pool-lifecycle)
-- [6. Thread Management](#6.-thread-management)
-  - [6.1. Core Threads (eager creation)](#6.1.-core-threads-%28eager-creation%29)
-  - [6.2. Non-core Threads (on-demand creation)](#6.2.-non-core-threads-%28on-demand-creation%29)
-  - [6.3. Watcher Thread](#6.3.-watcher-thread)
-  - [6.4. No Detachment Policy](#6.4.-no-detachment-policy)
-- [7. Exception Handling](#7.-exception-handling)
-- [8. Rejection Policies](#8.-rejection-policies)
-- [9. Interface Reference](#9.-interface-reference)
-  - [9.1. blocking_queue<T>](#9.1.-blocking_queue%3Ct%3E)
-  - [9.2. callable](#9.2.-callable)
-  - [9.3. thread_pool](#9.3.-thread_pool)
-- [10. Usage Examples](#10.-usage-examples)
-  - [10.1. FIFO queue](#10.1.-fifo-queue)
-  - [10.2. Priority queue](#10.2.-priority-queue)
-- [11. Code Coverage](#11.-code-coverage)
+- [1. Overview](#1-overview)
+- [2. Core Classes](#2-core-classes)
+  - [2.1. `callable` — Task Wrapper](#21-%60callable%60-%E2%80%94-task-wrapper)
+  - [2.2. `blocking_queue<T>` — Queue Interface](#22-%60blocking_queue%3Ct%3E%60-%E2%80%94-queue-interface)
+  - [2.3. `array_blocking_queue<T>` — FIFO Implementation](#23-%60array_blocking_queue%3Ct%3E%60-%E2%80%94-fifo-implementation)
+  - [2.4. `priority_blocking_queue<T, Compare>` — Priority Implementation](#24-%60priority_blocking_queue%3Ct%2C-compare%3E%60-%E2%80%94-priority-implementation)
+  - [2.5. `reject_policy` — Rejection Policy Enum](#25-%60reject_policy%60-%E2%80%94-rejection-policy-enum)
+  - [2.6. `pool_fsm_state` — Lifecycle State Enum](#26-%60pool_fsm_state%60-%E2%80%94-lifecycle-state-enum)
+  - [2.7. `thread_pool` — Thread Pool](#27-%60thread_pool%60-%E2%80%94-thread-pool)
+- [3. Class Diagram](#3-class-diagram)
+- [4. Task Queue Design](#4-task-queue-design)
+- [5. Thread Pool Lifecycle](#5-thread-pool-lifecycle)
+- [6. Thread Management](#6-thread-management)
+  - [6.1. Core Threads (eager creation)](#61-core-threads-%28eager-creation%29)
+  - [6.2. Non-core Threads (on-demand creation)](#62-non-core-threads-%28on-demand-creation%29)
+  - [6.3. Watcher Thread](#63-watcher-thread)
+  - [6.4. No Detachment Policy](#64-no-detachment-policy)
+- [7. Exception Handling](#7-exception-handling)
+- [8. Rejection Policies](#8-rejection-policies)
+- [9. Interface Reference](#9-interface-reference)
+  - [9.1. blocking_queue<T>](#91-blocking_queue%3Ct%3E)
+  - [9.2. callable](#92-callable)
+  - [9.3. thread_pool](#93-thread_pool)
+- [10. Usage Examples](#10-usage-examples)
+  - [10.1. FIFO queue](#101-fifo-queue)
+  - [10.2. Priority queue](#102-priority-queue)
+- [11. Code Coverage](#11-code-coverage)
 <!-- /TOC -->
 
 ## 1. Overview
@@ -53,9 +53,9 @@ public:
     static constexpr unsigned int DEFAULT_PRIORITY = std::numeric_limits<unsigned int>::min();
 
     callable() noexcept;                                       // empty callable
-    explicit callable(unsigned int _priority) noexcept;        // empty with priority
-    explicit callable(std::function<void(void)> _func);        // task with DEFAULT_PRIORITY
-    callable(std::function<void(void)> _func, unsigned int _priority); // task with explicit priority
+    explicit callable(const unsigned int _priority) noexcept;  // empty with priority
+    explicit callable(std::function<void()> _func);            // task with DEFAULT_PRIORITY
+    callable(std::function<void()> _func, const unsigned int _priority); // task with explicit priority
 
     void operator()() const;
     int compare(const callable &other) const noexcept;
@@ -77,8 +77,8 @@ public:
     virtual void push(T&&) = 0;
     virtual bool try_push(T&&) = 0;
     virtual T pop() = 0;
-    virtual bool try_pop(T&) = 0;
-    virtual bool timed_pop(T&, std::chrono::milliseconds) = 0;
+    virtual bool try_pop(T &item) = 0;
+    virtual bool timed_pop(T &item, std::chrono::milliseconds timeout) = 0;
     virtual size_t size() const = 0;
     virtual bool empty() const = 0;
     virtual void wake_all() = 0;
@@ -101,13 +101,13 @@ public:
 
 - Backed by `std::vector<T>` with manual heap operations (`push_heap` / `pop_heap`)
 - Same locking and notification strategy as FIFO, but with heap ordering via `Compare`
-- Default `Compare` is `callable_priority_less`, which orders `callable` by priority (higher priority = dequeued first)
+- Default `Compare` is `callable_priority_less`, which orders `callable` by priority (higher priority = dequeued first). The default template parameter `Compare = callable_priority_less` makes the second type argument optional.
 
 **Type aliases** (defined in `thread_pool.hpp`):
 
 ```cpp
 using fifo_task_queue = array_blocking_queue<callable>;
-using priority_task_queue = priority_blocking_queue<callable, callable_priority_less>;
+using priority_task_queue = priority_blocking_queue<callable>; // Compare defaults to callable_priority_less
 ```
 
 ### 2.5. `reject_policy` — Rejection Policy Enum
@@ -142,13 +142,13 @@ Manages worker threads and task dispatching according to Java `ThreadPoolExecuto
 Constructors accept `std::chrono::seconds` or `std::chrono::minutes` for `keep_alive_time`:
 
 ```cpp
-thread_pool(unsigned int core, unsigned int max, std::chrono::seconds keep_alive,
-            std::unique_ptr<blocking_queue<callable>> queue,
-            reject_policy policy = reject_policy::abort);
+thread_pool(const unsigned int _core_pool_size, const unsigned int _max_pool_size,
+            const std::chrono::seconds _keep_alive_time, std::unique_ptr<blocking_queue<callable>> _work_queue,
+            const reject_policy _rej_policy = reject_policy::abort);
 
-thread_pool(unsigned int core, unsigned int max, std::chrono::minutes keep_alive,
-            std::unique_ptr<blocking_queue<callable>> queue,
-            reject_policy policy = reject_policy::abort);
+thread_pool(const unsigned int _core_pool_size, const unsigned int _max_pool_size,
+            const std::chrono::minutes _keep_alive_time, std::unique_ptr<blocking_queue<callable>> _work_queue,
+            const reject_policy _rej_policy = reject_policy::abort);
 ```
 
 **Validation**: `core_pool_size` must be ≤ `max_pool_size`.
@@ -213,14 +213,14 @@ classDiagram
         -core_threads vector~jthread~
         -non_core_threads unordered_map~id, jthread~
         -watcher_thread jthread
-        -work_queue unique_ptr~blocking_queue~
+        -work_queue std::unique_ptr~blocking_queue~
         -rej_policy reject_policy
         -pool_state atomic~pool_fsm_state~
-        -non_core_thread_mutex mutex
-        -join_mutex mutex
-        -termination_cv condition_variable
-        -join_cv condition_variable
-        -zombie_non_core_threads vector~id~
+        -non_core_thread_mutex mutable std::mutex
+        -join_mutex mutable std::mutex
+        -termination_cv std::condition_variable
+        -join_cv std::condition_variable
+        -zombie_non_core_threads std::vector~std::thread::id~
     }
 
     blocking_queue~T~ <|-- array_blocking_queue~T~
@@ -263,7 +263,7 @@ stateDiagram-v2
 ### 6.1. Core Threads (eager creation)
 
 - All `core_pool_size` threads are created in the constructor as `std::jthread`.
-- Core threads run `core_worker_loop()`: poll the queue with `timed_pop(1s)` in a loop.
+- Core threads run `core_worker_loop()`: poll the queue with `timed_pop(std::chrono::milliseconds(1000))` in a loop.
 - On timeout, they re-check `pool_state`:
   - `stop` → exit immediately
   - `shutdown` + queue empty → exit
@@ -272,7 +272,7 @@ stateDiagram-v2
 ### 6.2. Non-core Threads (on-demand creation)
 
 - Created only when the queue is full and `core_pool_size + non_core_threads.size() < max_pool_size`.
-- Non-core threads run `non_core_worker_loop(initial_task)`:
+- Non-core threads run `non_core_worker_loop(const callable &initial_task)`:
   1. Execute the initial task immediately
   2. Enter keep-alive polling: `timed_pop(keep_alive_time)`
   3. Exit on idle timeout or when `pool_state != running`
@@ -405,7 +405,7 @@ void func_with_args(int x, int y) {
 }
 
 int main() {
-    auto queue = std::make_unique<tp::priority_task_queue>();
+    auto queue = std::make_unique<tp::priority_task_queue>(); // Compare defaults to callable_priority_less
     tp::thread_pool pool(1, 2, std::chrono::seconds(10), std::move(queue));
 
     pool.execute(1, [] { printf("low\n"); });

@@ -1,15 +1,16 @@
 # Thread Pool
 
+
 <!-- TOC -->
-- [1. Features](#1.-features)
-- [2. Quick Start](#2.-quick-start)
-  - [2.1. CMake](#2.1.-cmake)
-  - [2.2. Meson](#2.2.-meson)
-  - [2.3. Code](#2.3.-code)
-- [3. Build](#3.-build)
-- [4. Testing](#4.-testing)
-- [5. Dependencies](#5.-dependencies)
-- [6. License](#6.-license)
+- [1. Features](#1-features)
+- [2. Quick Start](#2-quick-start)
+  - [2.1. CMake](#21-cmake)
+  - [2.2. Meson](#22-meson)
+  - [2.3. Code](#23-code)
+- [3. Build](#3-build)
+- [4. Testing](#4-testing)
+- [5. Dependencies](#5-dependencies)
+- [6. License](#6-license)
 <!-- /TOC -->
 
 A C++20 thread pool implementation modeled after Java's `ThreadPoolExecutor`, supporting core threads, maximum threads, idle timeout, task queues, and rejection policies.
