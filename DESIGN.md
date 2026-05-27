@@ -3,25 +3,25 @@
 <!-- TOC -->
 - [1. Overview](#1-overview)
 - [2. Core Classes](#2-core-classes)
-  - [2.1. `callable` — Task Wrapper](#21-%60callable%60-%E2%80%94-task-wrapper)
-  - [2.2. `blocking_queue<T>` — Queue Interface](#22-%60blocking_queue%3Ct%3E%60-%E2%80%94-queue-interface)
-  - [2.3. `array_blocking_queue<T>` — FIFO Implementation](#23-%60array_blocking_queue%3Ct%3E%60-%E2%80%94-fifo-implementation)
-  - [2.4. `priority_blocking_queue<T, Compare>` — Priority Implementation](#24-%60priority_blocking_queue%3Ct%2C-compare%3E%60-%E2%80%94-priority-implementation)
-  - [2.5. `reject_policy` — Rejection Policy Enum](#25-%60reject_policy%60-%E2%80%94-rejection-policy-enum)
-  - [2.6. `pool_fsm_state` — Lifecycle State Enum](#26-%60pool_fsm_state%60-%E2%80%94-lifecycle-state-enum)
-  - [2.7. `thread_pool` — Thread Pool](#27-%60thread_pool%60-%E2%80%94-thread-pool)
+  - [2.1. `callable`Task Wrapper](#21-callabletask-wrapper)
+  - [2.2. `blocking_queue<T>`Queue Interface](#22-blocking_queuetqueue-interface)
+  - [2.3. `array_blocking_queue<T>`FIFO Implementation](#23-array_blocking_queuetfifo-implementation)
+  - [2.4. `priority_blocking_queue<T, Compare>`Priority Implementation](#24-priority_blocking_queuet-comparepriority-implementation)
+  - [2.5. `reject_policy`Rejection Policy Enum](#25-reject_policyrejection-policy-enum)
+  - [2.6. `pool_fsm_state`Lifecycle State Enum](#26-pool_fsm_statelifecycle-state-enum)
+  - [2.7. `thread_pool`Thread Pool](#27-thread_poolthread-pool)
 - [3. Class Diagram](#3-class-diagram)
 - [4. Task Queue Design](#4-task-queue-design)
 - [5. Thread Pool Lifecycle](#5-thread-pool-lifecycle)
 - [6. Thread Management](#6-thread-management)
-  - [6.1. Core Threads (eager creation)](#61-core-threads-%28eager-creation%29)
-  - [6.2. Non-core Threads (on-demand creation)](#62-non-core-threads-%28on-demand-creation%29)
+  - [6.1. Core Threads (eager creation)](#61-core-threads-eager-creation)
+  - [6.2. Non-core Threads (on-demand creation)](#62-noncore-threads-ondemand-creation)
   - [6.3. Watcher Thread](#63-watcher-thread)
   - [6.4. No Detachment Policy](#64-no-detachment-policy)
 - [7. Exception Handling](#7-exception-handling)
 - [8. Rejection Policies](#8-rejection-policies)
 - [9. Interface Reference](#9-interface-reference)
-  - [9.1. blocking_queue<T>](#91-blocking_queue%3Ct%3E)
+  - [9.1. blocking_queue<T>](#91-blocking_queuet)
   - [9.2. callable](#92-callable)
   - [9.3. thread_pool](#93-thread_pool)
 - [10. Usage Examples](#10-usage-examples)
@@ -45,7 +45,7 @@ This project implements a C++20 thread pool modeled after Java's `ThreadPoolExec
 
 ## 2. Core Classes
 
-### 2.1. `callable` — Task Wrapper
+### 2.1. `callable`Task Wrapper
 
 ```cpp
 class callable {
@@ -67,7 +67,7 @@ public:
 - `operator()()` invokes the function; no-op if empty
 - `compare()` returns -1, 0, or 1 for three-way priority comparison
 
-### 2.2. `blocking_queue<T>` — Queue Interface
+### 2.2. `blocking_queue<T>`Queue Interface
 
 ```cpp
 template<typename T>
@@ -89,7 +89,7 @@ public:
 - `T` is `callable` in the thread pool context
 - `wake_all()` unblocks all threads waiting on `pop()` / `timed_pop()` (used during shutdown)
 
-### 2.3. `array_blocking_queue<T>` — FIFO Implementation
+### 2.3. `array_blocking_queue<T>`FIFO Implementation
 
 - Backed by `std::deque<T>`
 - Optional bounded capacity (unbounded if `std::nullopt`)
@@ -97,7 +97,7 @@ public:
 - Consumers pop from the front under lock and notify one producer
 - `pop()` blocks on a `condition_variable` with `!task_q.empty()` predicate
 
-### 2.4. `priority_blocking_queue<T, Compare>` — Priority Implementation
+### 2.4. `priority_blocking_queue<T, Compare>`Priority Implementation
 
 - Backed by `std::vector<T>` with manual heap operations (`push_heap` / `pop_heap`)
 - Same locking and notification strategy as FIFO, but with heap ordering via `Compare`
@@ -110,7 +110,7 @@ using fifo_task_queue = array_blocking_queue<callable>;
 using priority_task_queue = priority_blocking_queue<callable>; // Compare defaults to callable_priority_less
 ```
 
-### 2.5. `reject_policy` — Rejection Policy Enum
+### 2.5. `reject_policy`Rejection Policy Enum
 
 ```cpp
 enum class reject_policy {
@@ -123,7 +123,7 @@ enum class reject_policy {
 
 Applied when a task cannot be accepted (queue full and max threads reached).
 
-### 2.6. `pool_fsm_state` — Lifecycle State Enum
+### 2.6. `pool_fsm_state`Lifecycle State Enum
 
 ```cpp
 enum class pool_fsm_state {
@@ -133,7 +133,7 @@ enum class pool_fsm_state {
 };
 ```
 
-### 2.7. `thread_pool` — Thread Pool
+### 2.7. `thread_pool`Thread Pool
 
 Manages worker threads and task dispatching according to Java `ThreadPoolExecutor` semantics.
 

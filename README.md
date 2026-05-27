@@ -1,6 +1,5 @@
 # Thread Pool
 
-
 <!-- TOC -->
 - [1. Features](#1-features)
 - [2. Quick Start](#2-quick-start)
